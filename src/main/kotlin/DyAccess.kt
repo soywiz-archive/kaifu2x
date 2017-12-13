@@ -113,15 +113,21 @@ object DynamicAccess {
 		else -> null
 	}
 
+	fun Any?.toIntDefault(default: Int = 0): Int = when (this) {
+		is Number -> toInt()
+		is String -> toIntOrNull(10) ?: default
+		else -> default
+	}
+
 	fun Any?.toLongDefault(default: Long = 0L): Long = when (this) {
 		is Number -> toLong()
 		is String -> toLongOrNull(10) ?: default
 		else -> default
 	}
 
-	fun Any?.toIntDefault(default: Int = 0): Int = when (this) {
-		is Number -> toInt()
-		is String -> toIntOrNull(10) ?: default
+	fun Any?.toFloatDefault(default: Float = 0f): Float = when (this) {
+		is Number -> toFloat()
+		is String -> this.toFloat()
 		else -> default
 	}
 
@@ -133,7 +139,7 @@ object DynamicAccess {
 
 	val Any?.str: String get() = toString()
 	val Any?.int: Int get() = toIntDefault()
-	val Any?.float: Float get() = toDoubleDefault().toFloat()
+	val Any?.float: Float get() = toFloatDefault()
 	val Any?.double: Double get() = toDoubleDefault()
 	val Any?.long: Long get() = toLongDefault()
 
