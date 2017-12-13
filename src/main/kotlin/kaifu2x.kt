@@ -6,15 +6,54 @@ import com.soywiz.korim.format.PNG
 import com.soywiz.korim.format.writeTo
 import com.soywiz.korio.Korio
 import com.soywiz.korio.lang.ASCII
+import com.soywiz.korio.lang.UTF8
+import com.soywiz.korio.lang.toByteArray
 import com.soywiz.korio.lang.toString
 import com.soywiz.korio.serialization.json.Json
 import com.soywiz.korio.util.clamp
 import com.soywiz.korio.vfs.LocalVfs
 import com.soywiz.korio.vfs.resourcesVfs
+import org.tensorflow.Graph
+import org.tensorflow.Session
+import org.tensorflow.Tensor
+import org.tensorflow.TensorFlow
 import kotlin.math.max
 import kotlin.math.min
 
+inline fun <T : AutoCloseable, TR> T.auto(callback: (T) -> TR): TR {
+	try {
+		return callback(this)
+	} finally {
+		this.close()
+	}
+}
+
+fun tfdemo() {
+	Graph().auto { g ->
+		val value = "Hello from " + TensorFlow.version()
+
+		// Construct the computation graph with a single operation, a constant
+		// named "MyConst" with a value "value".
+		Tensor.create(value.toByteArray(UTF8)).auto { t ->
+			// The Java API doesn't yet include convenience functions for adding operations.
+			g.opBuilder("Const", "MyConst")
+				.setAttr("dtype", t.dataType())
+				.setAttr("value", t)
+				.build()
+		}
+
+		// Execute the "MyConst" operation in a Session.
+		Session(g).auto { s ->
+			s.runner().fetch("MyConst").run().get(0).auto { output ->
+				println(output.bytesValue().toString(UTF8))
+			}
+		}
+	}
+}
+
 fun main(args: Array<String>) = Korio {
+	tfdemo()
+
 	val model = getModel()
 	val image = PNG.decode(resourcesVfs["samples/small.png"]).toBMP32()
 	val im = image.scaleNearest(2, 2)
@@ -33,8 +72,31 @@ fun main(args: Array<String>) = Korio {
 //fun Int.rgbaToYCbCr(): Int = TODO()
 //fun Int.yCbCrToRgba(): Int = TODO()
 
-fun Int.rgbaToYCbCr(): Int = this
-fun Int.yCbCrToRgba(): Int = this
+fun Int.rgbaToYCbCr(): Int {
+	val r = RGBA.getR(this)
+	val g = RGBA.getG(this)
+	val b = RGBA.getB(this)
+	val a = RGBA.getA(this)
+
+	val Y = (0 + (0.299 * r) + (0.587 * g) + (0.114 * b)).toInt().clamp(0, 255)
+	val Cb = (128 - (0.168736 * r) - (0.331264 * g) + (0.5 * b)).toInt().clamp(0, 255)
+	val Cr = (128 + (0.5 * r) - (0.418688 * g) + (0.081312 * b)).toInt().clamp(0, 255)
+
+	return RGBA.pack(Y, Cb, Cr, a)
+}
+
+fun Int.yCbCrToRgba(): Int {
+	val Y = RGBA.getR(this)
+	val Cb = RGBA.getG(this)
+	val Cr = RGBA.getB(this)
+	val a = RGBA.getA(this)
+
+	val R = (Y + 1.402 * (Cr - 128)).toInt().clamp(0, 255)
+	val G = (Y - 0.34414 * (Cb - 128) - 0.71414 * (Cr - 128)).toInt().clamp(0, 255)
+	val B = (Y + 1.772 * (Cb - 128)).toInt().clamp(0, 255)
+
+	return RGBA.pack(R, G, B, a)
+}
 
 fun Bitmap32.rgbaToYCbCr(): Bitmap32 = Bitmap32(width, height).apply { for (n in 0 until area) this.data[n] = this@rgbaToYCbCr.data[n].rgbaToYCbCr() }
 fun Bitmap32.yCbCrToRgba(): Bitmap32 = Bitmap32(width, height).apply { for (n in 0 until area) this.data[n] = this@yCbCrToRgba.data[n].yCbCrToRgba() }
@@ -214,7 +276,7 @@ class FloatArray2(val width: Int, val height: Int, val data: FloatArray = FloatA
 
 		// @TODO: THREADS
 		for (y in 1 until height - 1) {
-			var n = y * width + 1
+			var n = index(1, y)
 
 			// @TODO: SIMD
 			// @TODO: Reduce reads by keeping a sliding window (9 memory reads for step -> 3 memory reads for step)

@@ -20,6 +20,7 @@ dependencies {
     compile "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlin_version"
     compile "com.soywiz:korio:0.18.0"
     compile "com.soywiz:korim:0.18.0"
+    compile "org.tensorflow:tensorflow:1.4.0"
 }
 compileKotlin {
     kotlinOptions {
