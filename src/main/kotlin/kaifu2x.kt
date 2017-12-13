@@ -1,14 +1,60 @@
 import com.soywiz.kmem.arraycopy
+import com.soywiz.korim.bitmap.Bitmap
+import com.soywiz.korim.bitmap.Bitmap32
+import com.soywiz.korim.color.RGBA
+import com.soywiz.korim.format.PNG
+import com.soywiz.korim.format.writeTo
 import com.soywiz.korio.Korio
 import com.soywiz.korio.lang.ASCII
 import com.soywiz.korio.lang.toString
 import com.soywiz.korio.serialization.json.Json
+import com.soywiz.korio.util.clamp
+import com.soywiz.korio.vfs.LocalVfs
 import com.soywiz.korio.vfs.resourcesVfs
 import kotlin.math.max
 import kotlin.math.min
 
 fun main(args: Array<String>) = Korio {
 	val model = getModel()
+	val image = PNG.decode(resourcesVfs["samples/small.png"]).toBMP32()
+	val im = image.scaleNearest(2, 2)
+	val imYCbCr = im.rgbaToYCbCr()
+	val pad = model.steps.size
+	val paddedY = imYCbCr.get0f().paddedEdge(pad)
+	val result = model.waifu2xInternal(paddedY) { current, total ->
+		println("$current/$total")
+	}
+	val out: Bitmap = imYCbCr.set0f(result).yCbCrToRgba()
+	out.writeTo(LocalVfs("/tmp/kaifu2x.sample.png"), formats = PNG)
+	println(paddedY)
+	println(result.unpaddedEdge(pad))
+}
+
+//fun Int.rgbaToYCbCr(): Int = TODO()
+//fun Int.yCbCrToRgba(): Int = TODO()
+
+fun Int.rgbaToYCbCr(): Int = this
+fun Int.yCbCrToRgba(): Int = this
+
+fun Bitmap32.rgbaToYCbCr(): Bitmap32 = Bitmap32(width, height).apply { for (n in 0 until area) this.data[n] = this@rgbaToYCbCr.data[n].rgbaToYCbCr() }
+fun Bitmap32.yCbCrToRgba(): Bitmap32 = Bitmap32(width, height).apply { for (n in 0 until area) this.data[n] = this@yCbCrToRgba.data[n].yCbCrToRgba() }
+
+fun Bitmap32.get0f(): FloatArray2 = FloatArray2(width, height).apply { for (n in 0 until area) this.data[n] = RGBA.getRf(this@get0f.data[n]) }
+fun Bitmap32.get1f(): FloatArray2 = FloatArray2(width, height).apply { for (n in 0 until area) this.data[n] = RGBA.getGf(this@get1f.data[n]) }
+fun Bitmap32.get2f(): FloatArray2 = FloatArray2(width, height).apply { for (n in 0 until area) this.data[n] = RGBA.getBf(this@get2f.data[n]) }
+
+fun Bitmap32.set0f(f: FloatArray2): Bitmap32 = this.apply {
+	for (n in 0 until area) this.data[n] = (this.data[n] and 0x000000FF.inv()) or (f.data[n].clamp(0f, 1f) * 255).toInt()
+}
+
+fun Bitmap32.scaleNearest(sx: Int, sy: Int): Bitmap32 {
+	val out = Bitmap32(width * sx, height * sy)
+	for (y in 0 until out.height) {
+		for (x in 0 until out.width) {
+			out[x, y] = this[x / sx, y / sy]
+		}
+	}
+	return out
 }
 
 fun Model.waifu2xInternal(paddedMap: FloatArray2, progressReport: (Int, Int) -> Unit = { cur, total -> }): FloatArray2 {
@@ -131,7 +177,16 @@ class FloatArray2(val width: Int, val height: Int, val data: FloatArray = FloatA
 	fun paddedEdge(pad: Int): FloatArray2 {
 		val out = FloatArray2(width + pad * 2, height + pad * 2)
 		for (y in 0 until height) {
-			arraycopy(this.data, index(0, y), out.data, index(pad, y), width)
+			arraycopy(this.data, index(0, y), out.data, out.index(pad, y + pad), width)
+		}
+		return out
+	}
+
+	fun unpaddedEdge(pad: Int): FloatArray2 {
+		val out = FloatArray2(width - pad * 2, height - pad * 2)
+		println("$this -> $out")
+		for (y in 0 until out.height) {
+			arraycopy(this.data, index(pad, y + pad), out.data, out.index(0, y), out.width)
 		}
 		return out
 	}
@@ -191,4 +246,6 @@ class FloatArray2(val width: Int, val height: Int, val data: FloatArray = FloatA
 			}
 		}
 	}
+
+	override fun toString(): String = "FloatArray2($width, $height)"
 }
