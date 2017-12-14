@@ -286,8 +286,7 @@ fun Model.waifu2x(map: FloatArray2, parallel: Boolean = true, progressReport: (I
 	var i_planes = arrayOf(map.paddedEdge(steps.size))
 	val total = steps.map { it.nInputPlane * it.nOutputPlane }.sum()
 	var current = 0
-	val nthreads = if (parallel) Thread.activeCount() * 2 else 1
-
+	val nthreads = if (parallel) Runtime.getRuntime().availableProcessors() else 1
 	val tpool = Executors.newFixedThreadPool(nthreads)
 
 	System.err.println("Processing Threads: $nthreads")
@@ -324,16 +323,17 @@ fun Model.waifu2x(map: FloatArray2, parallel: Boolean = true, progressReport: (I
 						} else {
 							partial.setToAdd(partial, p)
 						}
-						current++
 					}
 				}
 			}
 
 			val partial = o_planes[index]
 
-			// Wait all threads and accumulate partial values
+			// Wait all tasks to complete
+			for (n in 0 until nthreads) futures[n].get()
+
+			// Accumulate partial values from threads
 			for (n in 0 until nthreads) {
-				futures[n].get()
 				if (n == 0) {
 					partial.setTo(tpartials[n])
 				} else {
@@ -346,7 +346,7 @@ fun Model.waifu2x(map: FloatArray2, parallel: Boolean = true, progressReport: (I
 				max(bit, 0f) + (min(bit, 0f) * 0.1f)
 			}
 
-
+			current += weights.size
 			progressReport(current, total)
 		}
 
