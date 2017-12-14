@@ -2,10 +2,7 @@ package com.soywiz.kaifu2x
 
 import com.soywiz.kaifu2x.util.*
 import com.soywiz.korim.bitmap.Bitmap32
-import com.soywiz.korim.format.defaultImageFormats
-import com.soywiz.korim.format.readBitmapNoNative
-import com.soywiz.korim.format.registerStandard
-import com.soywiz.korim.format.writeTo
+import com.soywiz.korim.format.*
 import com.soywiz.korio.Korio
 import com.soywiz.korio.error.invalidArg
 import com.soywiz.korio.error.invalidOp
@@ -121,6 +118,21 @@ object Kaifu2x {
 }
 
 suspend fun Model.waifu2xCoreRgba(name: String, image: Bitmap32, components: List<ColorComponent>, parallel: Boolean): Bitmap32 {
+	//val chunkSize = 128
+	//val chunkSize = 32
+	//val chunkSize = 400
+	//val artifactThresold = 2
+	//val artifactThresold = 4
+	//val artifactThresold = 8
+	//val artifactThresold = 16
+	//val artifactThresold = 32
+
+	val chunkSize = 2048
+	//val chunkSize = 128
+	val artifactThresold = 0
+	//val artifactThresold = 32
+	//val artifactThresold = 40
+
 	val model = this
 	val imYCbCr = image.rgbaToYCbCr()
 	val time = measureTimeMillis {
@@ -129,24 +141,54 @@ suspend fun Model.waifu2xCoreRgba(name: String, image: Bitmap32, components: Lis
 
 		System.err.println("Components: Requested:${components.map { it.toStringYCbCr() }} -> Required:${acomponents.map { it.toStringYCbCr() }}")
 
-		val startTime = System.currentTimeMillis()
-		model.waifu2xYCbCrInplace(imYCbCr, acomponents, parallel = parallel) { current, total ->
-			val currentTime = System.currentTimeMillis()
-			val ratio = current.toDouble() / total.toDouble()
-			val elapsedMs = (currentTime - startTime)
-			val estimatedMs = elapsedMs * (1.0 / ratio)
-			System.err.print(
-				"\rProgress($name): %.1f%% - Elapsed: %s - Remaining: %s  ".format(
-					(ratio * 100).toFloat(),
-					toTimeString(elapsedMs.toInt()),
-					toTimeString((estimatedMs - elapsedMs).toInt())
-				)
-			)
+		for (y in 0 until imYCbCr.height step (chunkSize - artifactThresold * 2)) {
+			for (x in 0 until imYCbCr.width step (chunkSize - artifactThresold * 2)) {
+				val swidth = min(chunkSize, imYCbCr.width - x)
+				val sheight = min(chunkSize, imYCbCr.height - y)
+				println("CHUNK($x, $y, $swidth, $sheight) [${imYCbCr.width}, ${imYCbCr.height}]")
+				val chunk = imYCbCr.copySliceWithSize2(x, y, swidth, sheight)
+
+				System.gc()
+
+				val startTime = System.currentTimeMillis()
+				model.waifu2xYCbCrInplace(chunk, acomponents, parallel = parallel) { current, total ->
+					val currentTime = System.currentTimeMillis()
+					val ratio = current.toDouble() / total.toDouble()
+					val elapsedMs = (currentTime - startTime)
+					val estimatedMs = elapsedMs * (1.0 / ratio)
+					System.err.print(
+						"\r[%s] %.1f%% - ELA: %s - ETA: %s - MEM: %s ".format(
+							name,
+							(ratio * 100).toFloat(),
+							toTimeString(elapsedMs.toInt()),
+							toTimeString((estimatedMs - elapsedMs).toInt()),
+							getMemoryUsedString()
+						)
+					)
+				}
+				System.err.println()
+
+				val dx = if (x == 0) 0 else artifactThresold
+				val dy = if (y == 0) 0 else artifactThresold
+				if ((chunk.width - dx) > 0 && (chunk.height - dy) > 0) {
+					imYCbCr.put(chunk.copySliceWithSize2(dx, dy, chunk.width - dx, chunk.height - dy), x + dx, y + dy)
+					//imYCbCr.put(chunk.sliceWithBounds(dx, dy, chunk.width, chunk.height), x + dx, y + dy)
+					//imYCbCr.put(chunk.copySliceWithSize2(artifactThresold, artifactThresold, chunk.width - artifactThresold, chunk.height - artifactThresold), x + artifactThresold, y + artifactThresold)
+				}
+			}
 		}
 	}
 	System.err.println()
 	System.err.println("Took: " + time.toDouble() / 1000 + " seconds")
 	return imYCbCr.yCbCrToRgba()
+}
+
+fun getMemoryUsedString(): String {
+	return "%.2f MB".format(getMemoryUsed().toDouble() / (1024.0 * 1024.0))
+}
+
+fun getMemoryUsed(): Long {
+	return Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()
 }
 
 //fun Model.waifu2xRgba(imRgba: Bitmap32, acomponents: List<ColorComponent>, parallel: Boolean = true, progressReport: (Int, Int) -> Unit = { cur, total -> }): Bitmap32 {

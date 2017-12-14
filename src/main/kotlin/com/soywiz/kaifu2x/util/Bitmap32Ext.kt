@@ -1,10 +1,12 @@
 package com.soywiz.kaifu2x.util
 
+import com.soywiz.kmem.arraycopy
 import com.soywiz.korim.bitmap.Bitmap32
 import com.soywiz.korim.color.RGBA
 import com.soywiz.korio.error.invalidOp
 import com.soywiz.korio.util.clamp
 
+// @TODO: Move to korim
 fun Int.rgbaToYCbCr(): Int {
 	val R = RGBA.getR(this)
 	val G = RGBA.getG(this)
@@ -101,4 +103,12 @@ fun ColorComponent.toStringYCbCr() = when (this.index) {
 	2 -> "Cr"
 	3 -> "A"
 	else -> invalidOp
+}
+
+fun Bitmap32.copySliceWithSize2(x: Int, y: Int, width: Int, height: Int): Bitmap32 {
+	val out = Bitmap32(width, height)
+	for (yy in 0 until height) {
+		arraycopy(this.data, this.index(x, y + yy), out.data, out.index(0, yy), width)
+	}
+	return out
 }
