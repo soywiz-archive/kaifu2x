@@ -104,6 +104,9 @@ then
 In each contiguous step (from left to right) we have 6 values that are the same that in the previous
 step, but shifted. So we only have 3 new values that we have to read from memory in each step.
 
+Sadly we can't do the same for vertical, so we still are reading 3 times the required pixels, but much better than 9 times.
+We cannot reuse partial results like in dynamic programming, so probably not much to optimize here except for SIMD.
+
 #### Parallelize
 
 Reduced from 24 seconds to 12 seconds in a `MBP13@2.4ghz`
