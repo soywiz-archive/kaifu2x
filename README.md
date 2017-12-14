@@ -8,6 +8,27 @@ It uses a [caffee based](http://caffe.berkeleyvision.org/) deep learning models.
 
 ![](/docs/side2side.png)
 
+### How does this work?
+
+#### Nearest neighbour scaling
+
+First of all, we scale the image using a nearest neighbour approach. That's it:
+
+![](/docs/goku_small_bg.png)
+![](/docs/kaifu2x.nearest.2x.png)
+
+#### YCbCr color space
+
+Waifu2x requires a [YCbCr](https://en.wikipedia.org/wiki/YCbCr) image or [YUV](https://en.wikipedia.org/wiki/YUV) image (whatever), since it just uses the [luminance component](https://en.wikipedia.org/wiki/Luminance) component.
+
+YCbCr decomposition representing each component as grayscale:
+![](/docs/kaifu2x.YYYA.png)![](/docs/kaifu2x.CbCbCbA.png)![](/docs/kaifu2x.CrCrCrA.png)
+
+So for waifu2x we are just using this:
+![](/docs/kaifu2x.YYYA.png)
+
+NOTE: We can process each component independently, specially the alpha channel. But we are not going to do this for now.
+
 ### Optimizations done
 
 #### Sliding memory reading for convolution kernel

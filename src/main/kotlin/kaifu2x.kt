@@ -4,11 +4,13 @@ import com.soywiz.korim.bitmap.Bitmap32
 import com.soywiz.korim.color.RGBA
 import com.soywiz.korim.format.PNG
 import com.soywiz.korim.format.showImageAndWait
+import com.soywiz.korim.format.writeTo
 import com.soywiz.korio.Korio
 import com.soywiz.korio.lang.ASCII
 import com.soywiz.korio.lang.toString
 import com.soywiz.korio.serialization.json.Json
 import com.soywiz.korio.util.clamp
+import com.soywiz.korio.vfs.LocalVfs
 import com.soywiz.korio.vfs.resourcesVfs
 import java.util.stream.Collectors
 import kotlin.math.max
@@ -37,21 +39,47 @@ fun main(args: Array<String>) = Korio {
 object Example {
 	@JvmStatic
 	fun main(args: Array<String>) = Korio {
-		val model = getModel()
-		//val image = PNG.decode(resourcesVfs["samples/small.png"]).toBMP32()
 		val image = PNG.decode(resourcesVfs["samples/goku_small_bg.png"]).toBMP32()
 		val image2x = image.scaleNearest(2, 2)
 		val imYCbCr = image2x.rgbaToYCbCr()
+		val outputVfs = LocalVfs("/tmp")
+
+		image2x.writeTo(outputVfs["kaifu2x.nearest.2x.png"], formats = PNG)
+
+		val YYYA = imYCbCr.clone()
+		YYYA.writeComponent(ColorComponent.RED, imYCbCr, ColorComponent.RED)
+		YYYA.writeComponent(ColorComponent.GREEN, imYCbCr, ColorComponent.RED)
+		YYYA.writeComponent(ColorComponent.BLUE, imYCbCr, ColorComponent.RED)
+		YYYA.writeTo(outputVfs["kaifu2x.YYYA.png"], formats = PNG)
+		//showImageAndWait(YYYA)
+
+		val CbCbCbA = imYCbCr.clone()
+		CbCbCbA.writeComponent(ColorComponent.RED, imYCbCr, ColorComponent.GREEN)
+		CbCbCbA.writeComponent(ColorComponent.GREEN, imYCbCr, ColorComponent.GREEN)
+		CbCbCbA.writeComponent(ColorComponent.BLUE, imYCbCr, ColorComponent.GREEN)
+		CbCbCbA.writeTo(outputVfs["kaifu2x.CbCbCbA.png"], formats = PNG)
+		//showImageAndWait(CbCbCbA)
+
+		val CrCrCrA = imYCbCr.clone()
+		CrCrCrA.writeComponent(ColorComponent.RED, CrCrCrA, ColorComponent.BLUE)
+		CrCrCrA.writeComponent(ColorComponent.GREEN, CrCrCrA, ColorComponent.BLUE)
+		CrCrCrA.writeComponent(ColorComponent.BLUE, CrCrCrA, ColorComponent.BLUE)
+		CrCrCrA.writeTo(outputVfs["kaifu2x.CrCrCrA.png"], formats = PNG)
+		//showImageAndWait(CrCrCrA)
+
 		val Y = imYCbCr.get0f()
 		lateinit var result: FloatArray2
+		val model = getModel()
 		val time = measureTimeMillis {
 			result = model.waifu2x(Y) { current, total ->
 				print("\r" + ((current.toDouble() / total.toDouble()) * 100) + "%")
 			}
 		}
+
 		println("Took: " + time.toDouble() / 1000 + " seconds")
+
 		val imageW2x = imYCbCr.set0f(result).yCbCrToRgba()
-		//out.writeTo(LocalVfs("/tmp/kaifu2x.sample.png"), formats = PNG)
+		imageW2x.writeTo(outputVfs["kaifu2x.sample.png"], formats = PNG)
 
 		val imageSideBySide = Bitmap32(image2x.width + imageW2x.width, image2x.height)
 		imageSideBySide.put(image2x, 0, 0)
@@ -96,6 +124,23 @@ fun Bitmap32.yCbCrToRgba(): Bitmap32 = Bitmap32(width, height).apply { for (n in
 fun Bitmap32.get0f(): FloatArray2 = FloatArray2(width, height).apply { for (n in 0 until area) this.data[n] = RGBA.getRf(this@get0f.data[n]) }
 fun Bitmap32.get1f(): FloatArray2 = FloatArray2(width, height).apply { for (n in 0 until area) this.data[n] = RGBA.getGf(this@get1f.data[n]) }
 fun Bitmap32.get2f(): FloatArray2 = FloatArray2(width, height).apply { for (n in 0 until area) this.data[n] = RGBA.getBf(this@get2f.data[n]) }
+
+enum class ColorComponent(val index: Int) {
+	RED(0), GREEN(1), BLUE(2), ALPHA(3);
+
+	val shift = index * 8
+	val clearMask = (0xFF shl shift).inv()
+
+	fun extract(rgba: Int): Int = (rgba ushr shift) and 0xFF
+	fun insert(rgba: Int, value: Int): Int = (rgba and clearMask) or ((value and 0xFF) shl shift)
+}
+
+fun Bitmap32.writeComponent(dstCmp: ColorComponent, from: Bitmap32, srcCmp: ColorComponent) {
+	val fdata = from.data
+	for (n in 0 until area) {
+		data[n] = dstCmp.insert(data[n], srcCmp.extract(fdata[n]))
+	}
+}
 
 fun Bitmap32.set0f(f: FloatArray2): Bitmap32 = this.apply {
 	for (n in 0 until area) this.data[n] = (this.data[n] and 0x000000FF.inv()) or (f.data[n].clamp(0f, 1f) * 255).toInt()
