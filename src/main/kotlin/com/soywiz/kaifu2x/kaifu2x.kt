@@ -1,7 +1,6 @@
 package com.soywiz.kaifu2x
 
 import com.soywiz.klock.TimeSpan
-import com.soywiz.klock.milliseconds
 import com.soywiz.kmem.arraycopy
 import com.soywiz.korim.bitmap.Bitmap
 import com.soywiz.korim.bitmap.Bitmap32
@@ -14,8 +13,10 @@ import com.soywiz.korio.lang.toString
 import com.soywiz.korio.serialization.json.Json
 import com.soywiz.korio.util.clamp
 import com.soywiz.korio.vfs.LocalVfs
+import com.soywiz.korio.vfs.PathInfo
 import com.soywiz.korio.vfs.resourcesVfs
 import java.io.File
+import java.util.*
 import java.util.stream.Collectors
 import kotlin.math.max
 import kotlin.math.min
@@ -27,22 +28,53 @@ object Kaifu2x {
 	@JvmStatic
 	fun main(args: Array<String>) = Korio {
 		if (args.size < 2) {
-			System.err.println("Usage: kaifu2x <input.png> <output.png>")
+			System.err.println("Usage: kaifu2x [-jl] [-jla] <input.png> <output.png>")
 			System.exit(-1)
 		}
 
-		val inputFileName = args[0]
-		val outputFileName = args[1]
+		var justLuminance = false
+		var justLuminanceAlpha = false
+		var inputName: String? = null
+		var outputName: String? = null
+
+		val argsR = LinkedList(args.toList())
+		while (argsR.isNotEmpty()) {
+			val c = argsR.removeFirst()
+			when (c) {
+				"-jl" -> justLuminance = true
+				"-jla" -> justLuminanceAlpha = true
+				else -> {
+					when {
+						inputName == null -> inputName = c
+						outputName == null -> outputName = c
+						else -> invalidOp("Unexpected argument $c")
+					}
+				}
+			}
+		}
+
+		val inputFileName = inputName ?: invalidOp("Missing input file name")
+		val outputFileName = outputName ?: invalidOp("Missing output file name")
+
+		val outputExtension = PathInfo(outputFileName).extensionLC
+
+		if (outputExtension != "png") invalidOp("Just supported png outputs but found extension $outputExtension")
 
 		defaultImageFormats.registerStandard()
-		val model = getModel()
 		System.err.print("Reading $inputFileName...")
 		val image = LocalVfs(File(inputFileName)).readBitmapNoNative().toBMP32()
 		System.err.println("Ok")
+
+		val model = getModel()
+
 		val im = image.scaleNearest(2, 2)
 		val imYCbCr = im.rgbaToYCbCr()
 		val time = measureTimeMillis {
-			val components = ColorComponent.ALL.toList()
+			val components = when {
+				justLuminanceAlpha -> listOf(ColorComponent.RED, ColorComponent.ALPHA)
+				justLuminance -> listOf(ColorComponent.RED)
+				else -> ColorComponent.ALL.toList()
+			}
 
 			System.err.println("Input components: $components")
 
@@ -52,19 +84,19 @@ object Kaifu2x {
 
 			System.err.println("Processing components: $acomponents")
 
-			var startTime = System.currentTimeMillis()
+			val startTime = System.currentTimeMillis()
 
 			for ((index, c) in acomponents.withIndex()) {
 				val data = imYCbCr.readComponentf(c)
 				val result = model.waifu2x(data) { current, total ->
-					var currentTime = System.currentTimeMillis()
+					val currentTime = System.currentTimeMillis()
 					val rcurrent = index * total + current
 					val rtotal = total * acomponents.size
 					val ratio = rcurrent.toDouble() / rtotal.toDouble()
 					val elapsedMs = (currentTime - startTime)
 					val estimatedMs = elapsedMs * (1.0 / ratio)
 					System.err.print(
-						"\rProgress: %.1f%% - Elapsed: %s - Remaining: %s".format(
+						"\rProgress: %.1f%% - Elapsed: %s - Remaining: %s  ".format(
 							(ratio * 100).toFloat(),
 							toTimeString(elapsedMs.toInt()),
 							toTimeString((estimatedMs - elapsedMs).toInt())
