@@ -62,7 +62,7 @@ task fatJarCore(type: Jar) {
 task fatJarLauncher() {
     doLast {
         File launcherFile = new File(rootProject.buildDir, "libs/kaifu2x")
-        launcherFile.write('java -jar $0-all.jar $*')
+        launcherFile.write("java -jar \$0-all-${version}.jar \$*")
         Files.setPosixFilePermissions(launcherFile.toPath(), Files.getPosixFilePermissions(launcherFile.toPath()) + [PosixFilePermission.OWNER_EXECUTE, PosixFilePermission.GROUP_EXECUTE, PosixFilePermission.OTHERS_EXECUTE].toSet())
     }
 }
@@ -73,7 +73,7 @@ task fatJar(dependsOn: [fatJarCore, fatJarLauncher]) {
 task installCli(dependsOn: fatJar) {
     doLast {
         Files.copy(new File(rootProject.buildDir, "libs/kaifu2x").toPath(), new File("/usr/local/bin/kaifu2x").toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES)
-        Files.copy(new File(rootProject.buildDir, "libs/kaifu2x-all.jar").toPath(), new File("/usr/local/bin/kaifu2x-all.jar").toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES)
+        Files.copy(new File(rootProject.buildDir, "libs/kaifu2x-all-${version}.jar").toPath(), new File("/usr/local/bin/kaifu2x-all-${version}.jar").toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES)
     }
 }
 
