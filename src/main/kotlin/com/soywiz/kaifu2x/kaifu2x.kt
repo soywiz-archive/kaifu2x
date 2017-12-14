@@ -1,10 +1,10 @@
+package com.soywiz.kaifu2x
+
 import com.soywiz.kmem.arraycopy
 import com.soywiz.korim.bitmap.Bitmap
 import com.soywiz.korim.bitmap.Bitmap32
 import com.soywiz.korim.color.RGBA
-import com.soywiz.korim.format.PNG
-import com.soywiz.korim.format.showImageAndWait
-import com.soywiz.korim.format.writeTo
+import com.soywiz.korim.format.*
 import com.soywiz.korio.Korio
 import com.soywiz.korio.lang.ASCII
 import com.soywiz.korio.lang.toString
@@ -12,28 +12,38 @@ import com.soywiz.korio.serialization.json.Json
 import com.soywiz.korio.util.clamp
 import com.soywiz.korio.vfs.LocalVfs
 import com.soywiz.korio.vfs.resourcesVfs
+import java.io.File
 import java.util.stream.Collectors
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.system.measureTimeMillis
 
-fun main(args: Array<String>) = Korio {
-	val model = getModel()
-	//val image = PNG.decode(resourcesVfs["samples/small.png"]).toBMP32()
-	val image = PNG.decode(resourcesVfs["samples/goku_small_bg.png"]).toBMP32()
-	val im = image.scaleNearest(2, 2)
-	val imYCbCr = im.rgbaToYCbCr()
-	val Y = imYCbCr.get0f()
-	lateinit var result: FloatArray2
-	val time = measureTimeMillis {
-		result = model.waifu2x(Y) { current, total ->
-			print("\r" + ((current.toDouble() / total.toDouble()) * 100) + "%")
+fun main(args: Array<String>) = Kaifu2x.main(args)
+
+object Kaifu2x {
+	@JvmStatic fun main(args: Array<String>) = Korio {
+		if (args.size < 2) {
+			System.err.println("Usage: kaifu2x <input.png> <output.png>")
+			System.exit(-1)
 		}
+
+		defaultImageFormats.registerStandard()
+		val model = getModel()
+		val image = LocalVfs(File(args[0])).readBitmapNoNative().toBMP32()
+		val im = image.scaleNearest(2, 2)
+		val imYCbCr = im.rgbaToYCbCr()
+		val Y = imYCbCr.get0f()
+		lateinit var result: FloatArray2
+		val time = measureTimeMillis {
+			result = model.waifu2x(Y) { current, total ->
+				System.err.print("\r" + ((current.toDouble() / total.toDouble()) * 100) + "%")
+			}
+		}
+		System.err.println("Took: " + time.toDouble() / 1000 + " seconds")
+		val out: Bitmap = imYCbCr.set0f(result).yCbCrToRgba()
+		val outFile = LocalVfs(File(args[1])).ensureParents()
+		out.writeTo(outFile)
 	}
-	println("Took: " + time.toDouble() / 1000 + " seconds")
-	val out: Bitmap = imYCbCr.set0f(result).yCbCrToRgba()
-	//out.writeTo(LocalVfs("/tmp/kaifu2x.sample.png"), formats = PNG)
-	showImageAndWait(out)
 }
 
 object Example {
@@ -90,8 +100,8 @@ object Example {
 	}
 }
 
-//fun Int.rgbaToYCbCr(): Int = TODO()
-//fun Int.yCbCrToRgba(): Int = TODO()
+//fun Int.com.soywiz.kaifu2x.rgbaToYCbCr(): Int = TODO()
+//fun Int.com.soywiz.kaifu2x.yCbCrToRgba(): Int = TODO()
 
 fun Int.rgbaToYCbCr(): Int {
 	val R = RGBA.getR(this)
@@ -217,13 +227,12 @@ data class ModelConfig(
 )
 
 suspend fun getModel(): Model {
-	println("Start")
+	System.err.print("Reading model...")
 	val jsonString = resourcesVfs["models/scale2.0x_model.json"].readBytes().toString(ASCII)
-	println("Readed Json")
 	val json = Json.decode(jsonString)
-	val model = parseModel(json)
-	println("Decoded Json")
-	return model
+	return parseModel(json).apply {
+		System.err.println("Ok")
+	}
 }
 
 fun parseModel(json: Any?): Model {
@@ -429,5 +438,5 @@ class FloatArray2(val width: Int, val height: Int, val data: FloatArray = FloatA
 		}
 	}
 
-	override fun toString(): String = "FloatArray2($width, $height)"
+	override fun toString(): String = "com.soywiz.kaifu2x.FloatArray2($width, $height)"
 }

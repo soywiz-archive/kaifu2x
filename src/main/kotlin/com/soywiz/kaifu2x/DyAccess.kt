@@ -1,4 +1,4 @@
-/*
+package com.soywiz.kaifu2x/*
 // Move to a library
 class DyAccess(val obj: Any?) : Iterable<DyAccess> {
 	operator fun get(key: Int): DyAccess {
