@@ -100,17 +100,25 @@ suspend fun waifu2xScaleRgba(image: Bitmap32, scale: Int, components: List<Color
 	}
 }
 
+fun ColorComponent.toStringYCbCr() = when (this.index) {
+	0 -> "Y"
+	1 -> "Cb"
+	2 -> "Cr"
+	3 -> "A"
+	else -> invalidOp
+}
+
 suspend fun Model.waifu2xCoreRgba(name: String, image: Bitmap32, components: List<ColorComponent>, parallel: Boolean): Bitmap32 {
 	val model = this
 	val imYCbCr = image.rgbaToYCbCr()
 	val time = measureTimeMillis {
-		System.err.println("Input components: $components")
+		System.err.println("Input components: ${components.map { it.toStringYCbCr() }}")
 
 		val acomponents = components.filter {
 			imYCbCr.readComponentf(it).run { !areAllEqualTo(this[0, 0]) }
 		}
 
-		System.err.println("Processing components: $acomponents")
+		System.err.println("Processing components: ${acomponents.map { it.toStringYCbCr() }}")
 
 		val startTime = System.currentTimeMillis()
 
