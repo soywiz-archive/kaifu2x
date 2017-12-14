@@ -44,17 +44,25 @@ First of all, we scale the image using a nearest neighbour approach. That's it:
 
 #### YCbCr color space
 
-Waifu2x requires a [YCbCr](https://en.wikipedia.org/wiki/YCbCr) image or [YUV](https://en.wikipedia.org/wiki/YUV) image (whatever), since it just uses the [luminance component](https://en.wikipedia.org/wiki/Luminance) component.
+In waifu2x we have to compute images component-wise. So we cannot process RGBA at once, and we have to process
+each component first.
+
+With RGB, we have to process all three components to get a reasonable result.
+But with other color spaces we can reduce the number of components we process and also improve end quality.
+
+With [YCbCr](https://en.wikipedia.org/wiki/YCbCr) or [YUV](https://en.wikipedia.org/wiki/YUV) color spaces
+we divide it in [luminance component](https://en.wikipedia.org/wiki/Luma_(video)) and [chroma components](https://en.wikipedia.org/wiki/Chrominance).
+Separating it, we can just process luminance and keep chromance intact.
 
 YCbCr decomposition representing each component as grayscale:
 
 ![](/docs/kaifu2x.YYYA.png)![](/docs/kaifu2x.CbCbCbA.png)![](/docs/kaifu2x.CrCrCrA.png)
 
-So for waifu2x we are just using this:
+So for waifu2x we can just use this component, to reduce times by three with a pretty acceptable result:
 
 ![](/docs/kaifu2x.YYYA.png)
 
-NOTE: We can process each component independently, specially the alpha channel. But we are going to focus on luminance which provides most information.
+Also to get good enough results we have to process alpha channel too, in the case there is alpha information on it.
 
 #### Waifu2x input
 
