@@ -282,28 +282,36 @@ fun Bitmap32.scaleNearest(sx: Int, sy: Int): Bitmap32 {
 }
 
 fun Model.waifu2x(map: FloatArray2, parallel: Boolean = true, progressReport: (Int, Int) -> Unit = { cur, total -> }): FloatArray2 {
-	var planes = listOf(map.paddedEdge(steps.size))
+	var i_planes = arrayOf(map.paddedEdge(steps.size))
 	val total = steps.map { it.nInputPlane * it.nOutputPlane }.sum()
 	var current = 0
 	progressReport(0, total)
 	for (step in steps) {
-		val o_planes = arrayListOf<FloatArray2>()
-		for ((bias, weights) in step.bias.zip(step.weight)) {
+		val fip = i_planes[0]
+		// Do all allocations here for this step!
+		val o_planes = Array(step.weight.size) { FloatArray2(fip.width - 2, fip.height - 2) }
+		val p = FloatArray2(fip.width - 2, fip.height - 2)
+
+		for (index in 0 until step.weight.size) {
+			val bias = step.bias[index]
+			val weights = step.weight[index]
+
 			if (parallel) {
 				// 12 seconds!
-				val partials = planes.zip(weights).parallelStream().map { (ip, kernel) -> ip.convolvedValidOptimized(kernel) }.collect(Collectors.toList()).toTypedArray()
+				val partials = i_planes.zip(weights).parallelStream().map { (ip, kernel) -> ip.convolvedValidOptimized(kernel) }.collect(Collectors.toList()).toTypedArray()
 				current += weights.size
-				o_planes += sum(partials) + bias
+				o_planes[index] = sum(partials) + bias
 			} else {
-				// 24 seconds!
 				var first = true
 
-				val fplane = planes[0]
-				val partial = FloatArray2(fplane.width - 2, fplane.height - 2)
-				val p = FloatArray2(fplane.width - 2, fplane.height - 2)
+				val partial = o_planes[index]
 
-				for ((ip, kernel) in planes.zip(weights)) {
+				for (i in 0 until weights.size) {
+					val ip = i_planes[i]
+					val kernel = weights[i]
+
 					p.setToConvolvedValidOptimized(ip, kernel)
+
 					if (first) {
 						partial.setTo(p)
 						first = false
@@ -312,15 +320,19 @@ fun Model.waifu2x(map: FloatArray2, parallel: Boolean = true, progressReport: (I
 					}
 					current++
 				}
-				partial.setToAdd(partial, bias)
-				o_planes += partial
+
+				partial.setToFunc(partial) {
+					val bit = it + bias
+					max(bit, 0f) + (min(bit, 0f) * 0.1f)
+				}
 			}
 
 			progressReport(current, total)
 		}
-		planes = o_planes.map { p -> max(p, 0f) + min(p, 0f) * 0.1f }
+
+		i_planes = o_planes
 	}
-	return planes.first()
+	return i_planes.first()
 }
 
 data class Model(val steps: List<Step>)
@@ -405,13 +417,13 @@ class FloatArray2(val width: Int, val height: Int, val data: FloatArray = FloatA
 		}
 	}
 
-	fun setTo(r: FloatArray2) = run { for (n in 0 until area) data[n] = r.data[n] }
-	fun setToAdd(l: FloatArray2, r: FloatArray2) = run { for (n in 0 until area) data[n] = l.data[n] + r.data[n] }
-	fun setToAdd(l: FloatArray2, r: Float) = run { for (n in 0 until area) data[n] = l.data[n] + r }
-	fun setToMul(l: FloatArray2, r: Float) = run { for (n in 0 until area) data[n] = l.data[n] * r }
-	fun setToMin(l: FloatArray2, r: Float) = run { for (n in 0 until area) data[n] = min(l.data[n], r) }
-	fun setToMax(l: FloatArray2, r: Float) = run { for (n in 0 until area) data[n] = max(l.data[n], r) }
-	fun setToClamp(l: FloatArray2, min: Float, max: Float) = run { for (n in 0 until area) data[n] = min(max(l.data[n], min), max) }
+	fun setTo(r: FloatArray2) = setToFunc(r) { it }
+	fun setToAdd(l: FloatArray2, r: FloatArray2) = setToFunc2(l, r) { l, r -> l + r }
+	fun setToAdd(l: FloatArray2, r: Float) = setToFunc(l) { it + r }
+	fun setToMul(l: FloatArray2, r: Float) = setToFunc(l) { it * r }
+	fun setToMin(l: FloatArray2, r: Float) = setToFunc(l) { min(it, r) }
+	fun setToMax(l: FloatArray2, r: Float) = setToFunc(l) { max(it, r) }
+	fun setToClamp(l: FloatArray2, min: Float, max: Float) = setToFunc(l) { it.clamp(min, max) }
 
 	operator fun plus(that: FloatArray2) = copy().apply { setToAdd(this, that) }
 	operator fun plus(that: Float) = copy().apply { setToAdd(this, that) }
@@ -562,6 +574,19 @@ class FloatArray2(val width: Int, val height: Int, val data: FloatArray = FloatA
 				dp++
 			}
 		}
+	}
+
+	inline fun setToFunc(r: FloatArray2, func: (Float) -> Float) = this.apply {
+		val tdata = this.data
+		val rdata = r.data
+		for (n in 0 until area) tdata[n] = func(rdata[n])
+	}
+
+	inline fun setToFunc2(l: FloatArray2, r: FloatArray2, func: (Float, Float) -> Float) = this.apply {
+		val tdata = this.data
+		val ldata = l.data
+		val rdata = r.data
+		for (n in 0 until area) tdata[n] = func(ldata[n], rdata[n])
 	}
 
 	fun areAllEqualTo(v: Float): Boolean {
