@@ -7,8 +7,6 @@ It uses a [caffee-based](http://caffe.berkeleyvision.org/) deep learning models.
 Kotlin implementation uses [Korlib's Korim](https://github.com/korlibs/korim) for image processing.
 And it includes code to process convulational 3x3 kernels on a float matrix.
 
-![](/docs/goku_small_bg.png)
-
 ![](/docs/side2side.png)
 
 ### How does this work?
@@ -38,7 +36,7 @@ NOTE: We can process each component independently, specially the alpha channel. 
 
 #### Sliding memory reading for convolution kernel
 
-Reduced from 30 seconds to 24 seconds in a MBP13@2.4ghz
+Reduced from 30 seconds to 24 seconds in a `MBP13@2.4ghz`
 
 The initial optimization I have done to the code is to reduce memory reading at the [convolution kernel](https://docs.gimp.org/en/plug-in-convmatrix.html).
 Waifu2x model uses a convolution matrix of 3x3.
@@ -80,7 +78,7 @@ step, but shifted. So we only have 3 new values that we have to read from memory
 
 #### Parallelize
 
-Reduced from 24 seconds to 12 seconds in a MBP13@2.4ghz
+Reduced from 24 seconds to 12 seconds in a `MBP13@2.4ghz`
 
 This one is pretty straight forward: and it is to parallelize work in threads.
 I have tried several places for parallelizing to reduce the overhead.
