@@ -3,61 +3,21 @@ import com.soywiz.korim.bitmap.Bitmap
 import com.soywiz.korim.bitmap.Bitmap32
 import com.soywiz.korim.color.RGBA
 import com.soywiz.korim.format.PNG
+import com.soywiz.korim.format.showImageAndWait
 import com.soywiz.korim.format.writeTo
 import com.soywiz.korio.Korio
 import com.soywiz.korio.lang.ASCII
-import com.soywiz.korio.lang.UTF8
-import com.soywiz.korio.lang.toByteArray
 import com.soywiz.korio.lang.toString
 import com.soywiz.korio.serialization.json.Json
 import com.soywiz.korio.util.clamp
 import com.soywiz.korio.vfs.LocalVfs
 import com.soywiz.korio.vfs.resourcesVfs
-import org.tensorflow.TensorFlow
+import java.util.stream.Collectors
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.system.measureTimeMillis
 
-
-fun tfdemo() {
-	graph {
-		val value = "Hello from " + TensorFlow.version()
-
-		val const1 = value.toByteArray(UTF8).u8ArrayConstant()
-		val const2 = (0 until 16).map { 1.toByte() }.toByteArray().u8ArrayConstant()
-
-		session {
-			println(const1.getBytes().toString(UTF8))
-			println(const2.getBytes().toString(UTF8))
-			println((const1 + const2).getBytes().toString(UTF8))
-		}
-	}
-
-	//Graph().auto { g ->
-	//	val value = "Hello from " + TensorFlow.version()
-//
-	//	// Construct the computation graph with a single operation, a constant
-	//	// named "MyConst" with a value "value".
-	//	Tensor.create(value.toByteArray(UTF8)).auto { t ->
-	//		// The Java API doesn't yet include convenience functions for adding operations.
-	//		g.opBuilder("Const", "MyConst")
-	//			.setAttr("dtype", t.dataType())
-	//			.setAttr("value", t)
-	//			.build()
-	//	}
-//
-	//	// Execute the "MyConst" operation in a Session.
-	//	Session(g).auto { s ->
-	//		s.runner().fetch("MyConst").run().get(0).auto { output ->
-	//			println(output.bytesValue().toString(UTF8))
-	//		}
-	//	}
-	//}
-}
-
 fun main(args: Array<String>) = Korio {
-	tfdemo()
-
 	val model = getModel()
 	//val image = PNG.decode(resourcesVfs["samples/small.png"]).toBMP32()
 	val image = PNG.decode(resourcesVfs["samples/goku_small_bg.png"]).toBMP32()
@@ -72,7 +32,29 @@ fun main(args: Array<String>) = Korio {
 	}
 	println("Took: " + time.toDouble() / 1000 + " seconds")
 	val out: Bitmap = imYCbCr.set0f(result).yCbCrToRgba()
-	out.writeTo(LocalVfs("/tmp/kaifu2x.sample.png"), formats = PNG)
+	//out.writeTo(LocalVfs("/tmp/kaifu2x.sample.png"), formats = PNG)
+	showImageAndWait(out)
+}
+
+object Example {
+	fun main(args: Array<String>) = Korio {
+		val model = getModel()
+		//val image = PNG.decode(resourcesVfs["samples/small.png"]).toBMP32()
+		val image = PNG.decode(resourcesVfs["samples/goku_small_bg.png"]).toBMP32()
+		val im = image.scaleNearest(2, 2)
+		val imYCbCr = im.rgbaToYCbCr()
+		val Y = imYCbCr.get0f()
+		lateinit var result: FloatArray2
+		val time = measureTimeMillis {
+			result = model.waifu2x(Y) { current, total ->
+				print("\r" + ((current.toDouble() / total.toDouble()) * 100) + "%")
+			}
+		}
+		println("Took: " + time.toDouble() / 1000 + " seconds")
+		val out: Bitmap = imYCbCr.set0f(result).yCbCrToRgba()
+		out.writeTo(LocalVfs("/tmp/kaifu2x.sample.png"), formats = PNG)
+		//showImageAndWait(out)
+	}
 }
 
 //fun Int.rgbaToYCbCr(): Int = TODO()
@@ -125,7 +107,7 @@ fun Bitmap32.scaleNearest(sx: Int, sy: Int): Bitmap32 {
 	return out
 }
 
-fun Model.waifu2x(map: FloatArray2, progressReport: (Int, Int) -> Unit = { cur, total -> }): FloatArray2 {
+fun Model.waifu2x(map: FloatArray2, parallel: Boolean = true, progressReport: (Int, Int) -> Unit = { cur, total -> }): FloatArray2 {
 	var planes = listOf(map.paddedEdge(steps.size))
 	val total = steps.map { it.nInputPlane * it.nOutputPlane }.sum()
 	var current = 0
@@ -133,18 +115,26 @@ fun Model.waifu2x(map: FloatArray2, progressReport: (Int, Int) -> Unit = { cur, 
 	for (step in steps) {
 		val o_planes = arrayListOf<FloatArray2>()
 		for ((bias, weights) in step.bias.zip(step.weight)) {
-			var partial: FloatArray2? = null
-			for ((ip, kernel) in planes.zip(weights)) {
-				val p = ip.convolvedValidOptimized(kernel)
-				//val p = ip.convolvedValidUnoptimized(kernel)
-				if (partial == null) {
-					partial = p
-				} else {
-					partial += p
+			if (parallel) {
+				// 12 seconds!
+				val partials = planes.zip(weights).parallelStream().map { (ip, kernel) -> ip.convolvedValidOptimized(kernel) }.collect(Collectors.toList()).toTypedArray()
+				current += weights.size
+				o_planes += sum(partials) + bias
+			} else {
+				// 24 seconds!
+				var partial: FloatArray2? = null
+				for ((ip, kernel) in planes.zip(weights)) {
+					val p = ip.convolvedValidOptimized(kernel)
+					if (partial == null) {
+						partial = p
+					} else {
+						partial += p
+					}
+					current++
 				}
-				current++
+				o_planes += partial!! + bias
 			}
-			o_planes += partial!! + bias
+
 			progressReport(current, total)
 		}
 		planes = o_planes.map { p -> max(p, 0f) + min(p, 0f) * 0.1f }
@@ -218,6 +208,7 @@ fun parseModel(json: Any?): Model {
 	}
 }
 
+fun sum(rr: Array<FloatArray2>): FloatArray2 = FloatArray2(rr[0].width, rr[0].height).setToAdd(rr)
 fun min(l: FloatArray2, r: Float) = FloatArray2(l.width, l.height).apply { setToMin(l, r) }
 fun max(l: FloatArray2, r: Float) = FloatArray2(l.width, l.height).apply { setToMax(l, r) }
 fun clamp(l: FloatArray2, min: Float, max: Float) = FloatArray2(l.width, l.height).apply { setToClamp(l, min, max) }
@@ -226,6 +217,13 @@ class FloatArray2(val width: Int, val height: Int, val data: FloatArray = FloatA
 	val area = width * height
 
 	fun copy() = FloatArray2(width, height, data.copyOf())
+
+	fun setToAdd(rr: Array<FloatArray2>) = this.apply {
+		for (r in rr) {
+			val rData = r.data
+			for (n in 0 until area) data[n] += rData[n]
+		}
+	}
 
 	fun setToAdd(l: FloatArray2, r: FloatArray2) = run { for (n in 0 until area) data[n] = l.data[n] + r.data[n] }
 	fun setToAdd(l: FloatArray2, r: Float) = run { for (n in 0 until area) data[n] = l.data[n] + r }
@@ -285,7 +283,6 @@ class FloatArray2(val width: Int, val height: Int, val data: FloatArray = FloatA
 		val srcData = src.data
 		val srcWidth = src.width
 
-		// @TODO: THREADS
 		for (y in 0 until dst.height) {
 			var sp = src.index(1, y + 1)
 			var dp = dst.index(0, y)
@@ -345,7 +342,7 @@ class FloatArray2(val width: Int, val height: Int, val data: FloatArray = FloatA
 		val srcData = src.data
 		val srcWidth = src.width
 
-		// @TODO: THREADS
+		// @TODO: THREADS --> Probably better at other level
 		for (y in 0 until dst.height) {
 			var sp = src.index(1, y + 1)
 			var dp = dst.index(0, y)
