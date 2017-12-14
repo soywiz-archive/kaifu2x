@@ -85,6 +85,7 @@ object Example {
 		imageSideBySide.put(image2x, 0, 0)
 		imageSideBySide.put(imageW2x, image2x.width, 0)
 
+		imageSideBySide.writeTo(outputVfs["kaifu2x.side2side.png"], formats = PNG)
 		showImageAndWait(imageSideBySide)
 	}
 }

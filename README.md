@@ -7,7 +7,7 @@ It uses a [caffee-based](http://caffe.berkeleyvision.org/) deep learning models.
 Kotlin implementation uses [Korlib's Korim](https://github.com/korlibs/korim) for image processing.
 And it includes code to process convulational 3x3 kernels on a float matrix.
 
-![](/docs/side2side.png)
+![](/docs/kaifu2x.side2side.png)
 
 ### How does this work?
 
