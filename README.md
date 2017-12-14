@@ -2,7 +2,10 @@
 
 Waifu2x is a upscaler/noise-reductor for anime-style images based on convolutional neural networks.
 Original implementation [was written in LUA](https://github.com/lltcggie/waifu2x-caffe), and there is a [very simple python based implementation](https://marcan.st/transf/waifu2x.py).
-It uses a [caffee based](http://caffe.berkeleyvision.org/) deep learning models.
+It uses a [caffee-based](http://caffe.berkeleyvision.org/) deep learning models.
+
+Kotlin implementation uses [Korlib's Korim](https://github.com/korlibs/korim) for image processing.
+And it includes code to process convulational 3x3 kernels on a float matrix.
 
 ![](/docs/goku_small_bg.png)
 
