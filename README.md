@@ -9,6 +9,14 @@ And it includes code to process convulational 3x3 kernels on a float matrix.
 
 ![](/docs/kaifu2x.side2side.png)
 
+### How to use?
+
+```
+./gradlew fatJar
+cd build/libs
+java -jar kaifu2x-all.jar -jla input.png output.png
+```
+
 ### How does this work?
 
 #### Nearest neighbour scaling
