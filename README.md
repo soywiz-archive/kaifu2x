@@ -1,4 +1,5 @@
 ## Waifu2x implementation in pure Kotlin
 
-![](/docs/small.png)
+![](/docs/goku_small_bg.png)
+
 ![](/docs/side2side.png)
