@@ -2,7 +2,6 @@ package com.soywiz.kaifu2x
 
 import com.soywiz.klock.TimeSpan
 import com.soywiz.kmem.arraycopy
-import com.soywiz.korim.bitmap.Bitmap
 import com.soywiz.korim.bitmap.Bitmap32
 import com.soywiz.korim.color.RGBA
 import com.soywiz.korim.format.*
@@ -29,25 +28,34 @@ object Kaifu2x {
 	@JvmStatic
 	fun main(args: Array<String>) = Korio {
 		if (args.size < 2) {
-			System.err.println("Usage: kaifu2x [-st] [-mt] [-jl] [-jla] <input.png> <output.png>")
+			System.err.println("Usage: kaifu2x [-st] [-mt] [-jl] [-jla] [-n<X>] [-s<X>] <input.png> <output.png>")
 			System.exit(-1)
 		}
 
-		var multiThread = true
+		var parallel = true
 		var components = listOf(ColorComponent.RED, ColorComponent.ALPHA)
 		var inputName: String? = null
 		var outputName: String? = null
+		var noiseReduction: Int = 0
+		var scale: Int = 2
 
 		val argsR = LinkedList(args.toList())
 		while (argsR.isNotEmpty()) {
 			val c = argsR.removeFirst()
 			when (c) {
-				"-st" -> multiThread = false
-				"-mt" -> multiThread = true
+				"-st" -> parallel = false
+				"-mt" -> parallel = true
+				"-n0" -> noiseReduction = 0
+				"-n1" -> noiseReduction = 1
+				"-n2" -> noiseReduction = 2
+				"-n3" -> noiseReduction = 3
+				"-s1" -> scale = 1
+				"-s2" -> scale = 2
 				"-jl" -> components = listOf(ColorComponent.RED)
 				"-jlca" -> components = ColorComponent.ALL.toList()
 				"-jla" -> components = listOf(ColorComponent.RED, ColorComponent.ALPHA)
 				else -> {
+					if (c.startsWith("-")) invalidOp("Unknown switch $c")
 					when {
 						inputName == null -> inputName = c
 						outputName == null -> outputName = c
@@ -69,49 +77,60 @@ object Kaifu2x {
 		val image = LocalVfs(File(inputFileName)).readBitmapNoNative().toBMP32()
 		System.err.println("Ok")
 
-		val model = getModel()
+		val noiseReductedImage = waifu2xNoiseReductionRgba(image, noiseReduction, components, parallel)
+		val scaledImage = waifu2xScaleRgba(noiseReductedImage, scale, components, parallel)
 
-		val im = image.scaleNearest(2, 2)
-		val imYCbCr = im.rgbaToYCbCr()
-		val time = measureTimeMillis {
-			System.err.println("Input components: $components")
-
-			val acomponents = components.filter {
-				imYCbCr.readComponentf(it).run { !areAllEqualTo(this[0, 0]) }
-			}
-
-			System.err.println("Processing components: $acomponents")
-
-			val startTime = System.currentTimeMillis()
-
-			for ((index, c) in acomponents.withIndex()) {
-				val data = imYCbCr.readComponentf(c)
-				val result = model.waifu2x(data, parallel = multiThread) { current, total ->
-					val currentTime = System.currentTimeMillis()
-					val rcurrent = index * total + current
-					val rtotal = total * acomponents.size
-					val ratio = rcurrent.toDouble() / rtotal.toDouble()
-					val elapsedMs = (currentTime - startTime)
-					val estimatedMs = elapsedMs * (1.0 / ratio)
-					System.err.print(
-						"\rProgress: %.1f%% - Elapsed: %s - Remaining: %s  ".format(
-							(ratio * 100).toFloat(),
-							toTimeString(elapsedMs.toInt()),
-							toTimeString((estimatedMs - elapsedMs).toInt())
-						)
-					)
-				}
-				imYCbCr.writeComponentf(c, result)
-			}
-		}
-		System.err.println()
-		System.err.println("Took: " + time.toDouble() / 1000 + " seconds")
-		val out: Bitmap = imYCbCr.yCbCrToRgba()
 		val outFile = LocalVfs(File(outputFileName)).ensureParents()
 		System.err.print("Writting $outputFileName...")
-		out.writeTo(outFile)
+		scaledImage.writeTo(outFile)
 		System.err.println("Ok")
 	}
+}
+
+// Exposed functions
+suspend fun waifu2xNoiseReductionRgba(image: Bitmap32, noise: Int, components: List<ColorComponent>, parallel: Boolean): Bitmap32 {
+	return getNoiseModel(noise)?.waifu2xCoreRgba("noise$noise", image, components, parallel) ?: image
+}
+
+suspend fun waifu2xScaleRgba(image: Bitmap32, scale: Int, components: List<ColorComponent>, parallel: Boolean): Bitmap32 {
+	return when (scale) {
+		1 -> image
+		2 -> getScale2xModel().waifu2xCoreRgba("scale$scale", image.scaleNearest(scale, scale), components, parallel)
+		else -> invalidArg("Invalid scale $scale")
+	}
+}
+
+suspend fun Model.waifu2xCoreRgba(name: String, image: Bitmap32, components: List<ColorComponent>, parallel: Boolean): Bitmap32 {
+	val model = this
+	val imYCbCr = image.rgbaToYCbCr()
+	val time = measureTimeMillis {
+		System.err.println("Input components: $components")
+
+		val acomponents = components.filter {
+			imYCbCr.readComponentf(it).run { !areAllEqualTo(this[0, 0]) }
+		}
+
+		System.err.println("Processing components: $acomponents")
+
+		val startTime = System.currentTimeMillis()
+
+		model.waifu2xYCbCrInplace(imYCbCr, acomponents, parallel = parallel) { current, total ->
+			val currentTime = System.currentTimeMillis()
+			val ratio = current.toDouble() / total.toDouble()
+			val elapsedMs = (currentTime - startTime)
+			val estimatedMs = elapsedMs * (1.0 / ratio)
+			System.err.print(
+				"\rProgress($name): %.1f%% - Elapsed: %s - Remaining: %s  ".format(
+					(ratio * 100).toFloat(),
+					toTimeString(elapsedMs.toInt()),
+					toTimeString((estimatedMs - elapsedMs).toInt())
+				)
+			)
+		}
+	}
+	System.err.println()
+	System.err.println("Took: " + time.toDouble() / 1000 + " seconds")
+	return imYCbCr.yCbCrToRgba()
 }
 
 fun TimeSpan.toTimeString(components: Int = 3): String = toTimeString(milliseconds, components)
@@ -167,7 +186,7 @@ object Example {
 
 		val Y = imYCbCr.get0f()
 		lateinit var result: FloatArray2
-		val model = getModel()
+		val model = getScale2xModel()
 		val time = measureTimeMillis {
 			result = model.waifu2x(Y) { current, total ->
 				print("\r" + ((current.toDouble() / total.toDouble()) * 100) + "%")
@@ -276,6 +295,25 @@ fun Bitmap32.scaleNearest(sx: Int, sy: Int): Bitmap32 {
 	return out
 }
 
+fun Model.waifu2xRgba(imRgba: Bitmap32, acomponents: List<ColorComponent>, parallel: Boolean = true, progressReport: (Int, Int) -> Unit = { cur, total -> }): Bitmap32 {
+	val imYCbCr = imRgba.rgbaToYCbCr()
+	val result = waifu2xYCbCrInplace(imYCbCr, acomponents, parallel, progressReport)
+	return result.yCbCrToRgba()
+}
+
+fun Model.waifu2xYCbCrInplace(imYCbCr: Bitmap32, acomponents: List<ColorComponent>, parallel: Boolean = true, progressReport: (Int, Int) -> Unit = { cur, total -> }): Bitmap32 {
+	for ((index, c) in acomponents.withIndex()) {
+		val data = imYCbCr.readComponentf(c)
+		val result = waifu2x(data, parallel = parallel) { current, total ->
+			val rcurrent = index * total + current
+			val rtotal = total * acomponents.size
+			progressReport(rcurrent, rtotal)
+		}
+		imYCbCr.writeComponentf(c, result)
+	}
+	return imYCbCr
+}
+
 fun Model.waifu2x(map: FloatArray2, parallel: Boolean = true, progressReport: (Int, Int) -> Unit = { cur, total -> }): FloatArray2 {
 	var i_planes = arrayOf(map.paddedEdge(steps.size))
 	val total = steps.map { it.nInputPlane * it.nOutputPlane }.sum()
@@ -376,14 +414,19 @@ data class ModelConfig(
 	var offset: Int = 7
 )
 
-suspend fun getModel(): Model {
-	System.err.print("Reading model...")
-	val jsonString = resourcesVfs["models/scale2.0x_model.json"].readBytes().toString(ASCII)
+val modelsVfs by lazy { resourcesVfs["models"] }
+
+suspend fun readModel(name: String): Model {
+	System.err.print("Reading $name...")
+	val jsonString = modelsVfs[name].readBytes().toString(ASCII)
 	val json = Json.decode(jsonString)
 	return parseModel(json).apply {
 		System.err.println("Ok")
 	}
 }
+
+suspend fun getScale2xModel(): Model = readModel("scale2.0x_model.json")
+suspend fun getNoiseModel(level: Int): Model? = if (level in 1..3) readModel("noise${level}_model.json") else null
 
 fun parseModel(json: Any?): Model {
 	return DynamicAccess {
