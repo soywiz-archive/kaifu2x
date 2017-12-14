@@ -58,7 +58,8 @@ fun main(args: Array<String>) = Korio {
 	tfdemo()
 
 	val model = getModel()
-	val image = PNG.decode(resourcesVfs["samples/small.png"]).toBMP32()
+	//val image = PNG.decode(resourcesVfs["samples/small.png"]).toBMP32()
+	val image = PNG.decode(resourcesVfs["samples/goku_small_bg.png"]).toBMP32()
 	val im = image.scaleNearest(2, 2)
 	val imYCbCr = im.rgbaToYCbCr()
 	val pad = model.steps.size
@@ -68,8 +69,6 @@ fun main(args: Array<String>) = Korio {
 	}
 	val out: Bitmap = imYCbCr.set0f(result).yCbCrToRgba()
 	out.writeTo(LocalVfs("/tmp/kaifu2x.sample.png"), formats = PNG)
-	println(paddedY)
-	println(result.unpaddedEdge(pad))
 }
 
 //fun Int.rgbaToYCbCr(): Int = TODO()
@@ -262,7 +261,7 @@ class FloatArray2(val width: Int, val height: Int, val data: FloatArray = FloatA
 		a: Float, b: Float, c: Float,
 		d: Float, e: Float, f: Float,
 		g: Float, h: Float, i: Float
-	) = copy().apply {
+	) = FloatArray2(width - 2, height - 2).apply {
 		setToConvolvedValid(this@FloatArray2, a, b, c, d, e, f, g, h, i)
 	}
 
@@ -273,30 +272,34 @@ class FloatArray2(val width: Int, val height: Int, val data: FloatArray = FloatA
 		d: Float, e: Float, f: Float,
 		g: Float, h: Float, i: Float
 	) {
-		assert(width == src.width)
-		assert(height == src.height)
+		val dst = this
+		assert(dst.width == src.width - 2)
+		assert(dst.height == src.height - 2)
+		val dstData = dst.data
 		val srcData = src.data
+		val srcWidth = src.width
 
 		// @TODO: THREADS
-		for (y in 1 until height - 1) {
-			var n = index(1, y)
+		for (y in 0 until dst.height) {
+			var sp = src.index(1, y + 1)
+			var dp = dst.index(0, y)
 
 			// @TODO: SIMD
 			// @TODO: Reduce reads by keeping a sliding window (9 memory reads for step -> 3 memory reads for step)
-			for (x in 1 until width - 1) {
-				val _a = srcData[n - width - 1]
-				val _b = srcData[n - width + 0]
-				val _c = srcData[n - width + 1]
+			for (x in 0 until dst.width) {
+				val _a = srcData[sp - srcWidth - 1]
+				val _b = srcData[sp - srcWidth + 0]
+				val _c = srcData[sp - srcWidth + 1]
 
-				val _d = srcData[n - 1]
-				val _e = srcData[n + 0]
-				val _f = srcData[n + 1]
+				val _d = srcData[sp - 1]
+				val _e = srcData[sp + 0]
+				val _f = srcData[sp + 1]
 
-				val _g = srcData[n + width - 1]
-				val _h = srcData[n + width + 0]
-				val _i = srcData[n + width + 1]
+				val _g = srcData[sp + srcWidth - 1]
+				val _h = srcData[sp + srcWidth + 0]
+				val _i = srcData[sp + srcWidth + 1]
 
-				this.data[n] = 0f +
+				dstData[dp] = 0f +
 					a * _a +
 					b * _b +
 					c * _c +
@@ -307,7 +310,8 @@ class FloatArray2(val width: Int, val height: Int, val data: FloatArray = FloatA
 					h * _h +
 					i * _i
 
-				n++
+				sp++
+				dp++
 			}
 		}
 	}
