@@ -14,8 +14,22 @@ And it includes code to process convulational 3x3 kernels on a float matrix.
 ```
 ./gradlew fatJar
 cd build/libs
-java -jar kaifu2x-all.jar -jla input.png output.png
+java -jar kaifu2x-all.jar input.png output.png
 ```
+
+### Some numbers
+
+**Note:** As a performance example in a `MBP13@2.4ghz`
+it takes 4 minutes to process a single component for a 470x750 image
+for an output of 940x1500.
+
+And memory used:
+**Used:** 1.6GB, **Max Heap:** 2GB
+
+Think that in the last step it has to keep 256 times (128 for the input, and 128 for the output)
+the size of your uncompressed 2x image in memory.
+
+So a 940x1500 float components, requires 5.5MB, and 256 times: 1408 MB + some extra stuff like temp buffers and so.
 
 ### How does this work?
 

@@ -34,8 +34,7 @@ object Kaifu2x {
 		}
 
 		var multiThread = true
-		var justLuminance = false
-		var justLuminanceAlpha = false
+		var components = listOf(ColorComponent.RED, ColorComponent.ALPHA)
 		var inputName: String? = null
 		var outputName: String? = null
 
@@ -45,8 +44,9 @@ object Kaifu2x {
 			when (c) {
 				"-st" -> multiThread = false
 				"-mt" -> multiThread = true
-				"-jl" -> justLuminance = true
-				"-jla" -> justLuminanceAlpha = true
+				"-jl" -> components = listOf(ColorComponent.RED)
+				"-jlca" -> components = ColorComponent.ALL.toList()
+				"-jla" -> components = listOf(ColorComponent.RED, ColorComponent.ALPHA)
 				else -> {
 					when {
 						inputName == null -> inputName = c
@@ -74,12 +74,6 @@ object Kaifu2x {
 		val im = image.scaleNearest(2, 2)
 		val imYCbCr = im.rgbaToYCbCr()
 		val time = measureTimeMillis {
-			val components = when {
-				justLuminanceAlpha -> listOf(ColorComponent.RED, ColorComponent.ALPHA)
-				justLuminance -> listOf(ColorComponent.RED)
-				else -> ColorComponent.ALL.toList()
-			}
-
 			System.err.println("Input components: $components")
 
 			val acomponents = components.filter {
