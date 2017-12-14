@@ -115,6 +115,16 @@ So I have tried to parallelize the convolution work in a per row basis. But ther
 so the overhead was big.
 In the end I placed the parallelization in a previous step.
 
+#### Limit memory and unified implementation
+
+At this point I unified single threaded and multithreaded implementations. I used a fixed thread pool and manually
+assigned tasks so each thread just requires two additional arrays.
+
+#### Limit allocations
+
+In order to avoid tons of allocations, copies and so on, I preallocated all the required arrays for each step at once.
+Then instead of using immutable arrays, I changed operatins to be mutable and to work on existing arrays.
+
 #### Future optimizations
 
 Since we can't do SIMD optimizations manually in the JVM. And there are no guarantees that the JVM uses SIMD
