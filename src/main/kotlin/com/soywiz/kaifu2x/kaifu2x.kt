@@ -25,24 +25,38 @@ import kotlin.system.measureTimeMillis
 fun main(args: Array<String>) = Kaifu2x.main(args)
 
 object Kaifu2x {
+	fun help() {
+		System.err.println("Usage: kaifu2x [switches] <input.png> <output.png>")
+		System.err.println("")
+		System.err.println("Available switches:")
+		System.err.println("  -h      - Displays this help")
+		System.err.println("  -n[0-3] - Noise reduction [default to 0 (no noise reduction)]")
+		System.err.println("  -s[1-2] - Scale level 1=1x, 2=2x [default to 1 (no scale)]")
+		System.err.println("  -mt     - Multi Threaded [default]")
+		System.err.println("  -st     - Single Threaded")
+		System.err.println("  -cl     - Process Luminance")
+		System.err.println("  -cla    - Process Luminance & Alpha [default]")
+		System.err.println("  -clca   - Process Luminance & Chroma & Alpha")
+	}
+
+	fun helpAndExit(code: Int = -1) = run { help(); System.exit(code) }
+
 	@JvmStatic
 	fun main(args: Array<String>) = Korio {
-		if (args.size < 2) {
-			System.err.println("Usage: kaifu2x [-st] [-mt] [-jl] [-jla] [-n<X>] [-s<X>] <input.png> <output.png>")
-			System.exit(-1)
-		}
+		if (args.size < 2) helpAndExit()
 
 		var parallel = true
 		var components = listOf(ColorComponent.RED, ColorComponent.ALPHA)
 		var inputName: String? = null
 		var outputName: String? = null
 		var noiseReduction: Int = 0
-		var scale: Int = 2
+		var scale: Int = 1
 
 		val argsR = LinkedList(args.toList())
 		while (argsR.isNotEmpty()) {
 			val c = argsR.removeFirst()
 			when (c) {
+				"-h" -> helpAndExit()
 				"-st" -> parallel = false
 				"-mt" -> parallel = true
 				"-n0" -> noiseReduction = 0
@@ -51,9 +65,9 @@ object Kaifu2x {
 				"-n3" -> noiseReduction = 3
 				"-s1" -> scale = 1
 				"-s2" -> scale = 2
-				"-jl" -> components = listOf(ColorComponent.RED)
-				"-jlca" -> components = ColorComponent.ALL.toList()
-				"-jla" -> components = listOf(ColorComponent.RED, ColorComponent.ALPHA)
+				"-cl" -> components = listOf(ColorComponent.RED)
+				"-cla" -> components = listOf(ColorComponent.RED, ColorComponent.ALPHA)
+				"-clca" -> components = ColorComponent.ALL.toList()
 				else -> {
 					if (c.startsWith("-")) invalidOp("Unknown switch $c")
 					when {
@@ -84,6 +98,10 @@ object Kaifu2x {
 		System.err.print("Writting $outputFileName...")
 		scaledImage.writeTo(outFile)
 		System.err.println("Ok")
+
+		if (noiseReduction == 0 && scale == 1) {
+			System.err.println("WARNING!!: No operation done! Please add -nX or -sX switches to control noise reduction and scaling")
+		}
 	}
 }
 

@@ -16,7 +16,23 @@ You can grab a precompiled jar from [github's the Releases page](https://github.
 ```
 ./gradlew fatJar
 cd build/libs
-java -jar kaifu2x-all.jar input.png output.png
+java -jar kaifu2x-all.jar -n0 -s2 input.png output.png
+```
+
+### Help
+
+```
+Usage: kaifu2x [switches] <input.png> <output.png>
+
+Available switches:
+  -h      - Displays this help
+  -n[0-3] - Noise reduction [default to 0 (no noise reduction)]
+  -s[1-2] - Scale level 1=1x, 2=2x [default to 1 (no scale)]
+  -mt     - Multi Threaded [default]
+  -st     - Single Threaded
+  -cl     - Process Luminance
+  -cla    - Process Luminance & Alpha [default]
+  -clca   - Process Luminance & Chroma & Alpha
 ```
 
 ### Some numbers
