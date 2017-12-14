@@ -4,13 +4,11 @@ import com.soywiz.korim.bitmap.Bitmap32
 import com.soywiz.korim.color.RGBA
 import com.soywiz.korim.format.PNG
 import com.soywiz.korim.format.showImageAndWait
-import com.soywiz.korim.format.writeTo
 import com.soywiz.korio.Korio
 import com.soywiz.korio.lang.ASCII
 import com.soywiz.korio.lang.toString
 import com.soywiz.korio.serialization.json.Json
 import com.soywiz.korio.util.clamp
-import com.soywiz.korio.vfs.LocalVfs
 import com.soywiz.korio.vfs.resourcesVfs
 import java.util.stream.Collectors
 import kotlin.math.max
@@ -37,12 +35,13 @@ fun main(args: Array<String>) = Korio {
 }
 
 object Example {
+	@JvmStatic
 	fun main(args: Array<String>) = Korio {
 		val model = getModel()
 		//val image = PNG.decode(resourcesVfs["samples/small.png"]).toBMP32()
 		val image = PNG.decode(resourcesVfs["samples/goku_small_bg.png"]).toBMP32()
-		val im = image.scaleNearest(2, 2)
-		val imYCbCr = im.rgbaToYCbCr()
+		val image2x = image.scaleNearest(2, 2)
+		val imYCbCr = image2x.rgbaToYCbCr()
 		val Y = imYCbCr.get0f()
 		lateinit var result: FloatArray2
 		val time = measureTimeMillis {
@@ -51,9 +50,14 @@ object Example {
 			}
 		}
 		println("Took: " + time.toDouble() / 1000 + " seconds")
-		val out: Bitmap = imYCbCr.set0f(result).yCbCrToRgba()
-		out.writeTo(LocalVfs("/tmp/kaifu2x.sample.png"), formats = PNG)
-		//showImageAndWait(out)
+		val imageW2x = imYCbCr.set0f(result).yCbCrToRgba()
+		//out.writeTo(LocalVfs("/tmp/kaifu2x.sample.png"), formats = PNG)
+
+		val imageSideBySide = Bitmap32(image2x.width + imageW2x.width, image2x.height)
+		imageSideBySide.put(image2x, 0, 0)
+		imageSideBySide.put(imageW2x, image2x.width, 0)
+
+		showImageAndWait(imageSideBySide)
 	}
 }
 
