@@ -16,6 +16,7 @@ import com.soywiz.korio.vfs.resourcesVfs
 import org.tensorflow.TensorFlow
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.system.measureTimeMillis
 
 
 fun tfdemo() {
@@ -62,11 +63,14 @@ fun main(args: Array<String>) = Korio {
 	val image = PNG.decode(resourcesVfs["samples/goku_small_bg.png"]).toBMP32()
 	val im = image.scaleNearest(2, 2)
 	val imYCbCr = im.rgbaToYCbCr()
-	val pad = model.steps.size
-	val paddedY = imYCbCr.get0f().paddedEdge(pad)
-	val result = model.waifu2xInternal(paddedY) { current, total ->
-		println("$current/$total")
+	val Y = imYCbCr.get0f()
+	lateinit var result: FloatArray2
+	val time = measureTimeMillis {
+		result = model.waifu2x(Y) { current, total ->
+			print("\r" + ((current.toDouble() / total.toDouble()) * 100) + "%")
+		}
 	}
+	println("Took: " + time.toDouble() / 1000 + " seconds")
 	val out: Bitmap = imYCbCr.set0f(result).yCbCrToRgba()
 	out.writeTo(LocalVfs("/tmp/kaifu2x.sample.png"), formats = PNG)
 }
@@ -75,29 +79,29 @@ fun main(args: Array<String>) = Korio {
 //fun Int.yCbCrToRgba(): Int = TODO()
 
 fun Int.rgbaToYCbCr(): Int {
-	val r = RGBA.getR(this)
-	val g = RGBA.getG(this)
-	val b = RGBA.getB(this)
-	val a = RGBA.getA(this)
+	val R = RGBA.getR(this)
+	val G = RGBA.getG(this)
+	val B = RGBA.getB(this)
+	val A = RGBA.getA(this)
 
-	val Y = (0 + (0.299 * r) + (0.587 * g) + (0.114 * b)).toInt().clamp(0, 255)
-	val Cb = (128 - (0.168736 * r) - (0.331264 * g) + (0.5 * b)).toInt().clamp(0, 255)
-	val Cr = (128 + (0.5 * r) - (0.418688 * g) + (0.081312 * b)).toInt().clamp(0, 255)
+	val Y = (0 + (0.299 * R) + (0.587 * G) + (0.114 * B)).toInt().clamp(0, 255)
+	val Cb = (128 - (0.168736 * R) - (0.331264 * G) + (0.5 * B)).toInt().clamp(0, 255)
+	val Cr = (128 + (0.5 * R) - (0.418688 * G) - (0.081312 * B)).toInt().clamp(0, 255)
 
-	return RGBA.pack(Y, Cb, Cr, a)
+	return RGBA.pack(Y, Cb, Cr, A)
 }
 
 fun Int.yCbCrToRgba(): Int {
 	val Y = RGBA.getR(this)
 	val Cb = RGBA.getG(this)
 	val Cr = RGBA.getB(this)
-	val a = RGBA.getA(this)
+	val A = RGBA.getA(this)
 
 	val R = (Y + 1.402 * (Cr - 128)).toInt().clamp(0, 255)
 	val G = (Y - 0.34414 * (Cb - 128) - 0.71414 * (Cr - 128)).toInt().clamp(0, 255)
 	val B = (Y + 1.772 * (Cb - 128)).toInt().clamp(0, 255)
 
-	return RGBA.pack(R, G, B, a)
+	return RGBA.pack(R, G, B, A)
 }
 
 fun Bitmap32.rgbaToYCbCr(): Bitmap32 = Bitmap32(width, height).apply { for (n in 0 until area) this.data[n] = this@rgbaToYCbCr.data[n].rgbaToYCbCr() }
@@ -121,8 +125,8 @@ fun Bitmap32.scaleNearest(sx: Int, sy: Int): Bitmap32 {
 	return out
 }
 
-fun Model.waifu2xInternal(paddedMap: FloatArray2, progressReport: (Int, Int) -> Unit = { cur, total -> }): FloatArray2 {
-	var planes = listOf(paddedMap)
+fun Model.waifu2x(map: FloatArray2, progressReport: (Int, Int) -> Unit = { cur, total -> }): FloatArray2 {
+	var planes = listOf(map.paddedEdge(steps.size))
 	val total = steps.map { it.nInputPlane * it.nOutputPlane }.sum()
 	var current = 0
 	progressReport(0, total)
@@ -131,16 +135,17 @@ fun Model.waifu2xInternal(paddedMap: FloatArray2, progressReport: (Int, Int) -> 
 		for ((bias, weights) in step.bias.zip(step.weight)) {
 			var partial: FloatArray2? = null
 			for ((ip, kernel) in planes.zip(weights)) {
-				val p = ip.convolvedValid(kernel)
+				val p = ip.convolvedValidOptimized(kernel)
+				//val p = ip.convolvedValidUnoptimized(kernel)
 				if (partial == null) {
 					partial = p
 				} else {
 					partial += p
 				}
 				current++
-				progressReport(current, total)
 			}
 			o_planes += partial!! + bias
+			progressReport(current, total)
 		}
 		planes = o_planes.map { p -> max(p, 0f) + min(p, 0f) * 0.1f }
 	}
@@ -246,27 +251,88 @@ class FloatArray2(val width: Int, val height: Int, val data: FloatArray = FloatA
 		return out
 	}
 
-	fun unpaddedEdge(pad: Int): FloatArray2 {
-		val out = FloatArray2(width - pad * 2, height - pad * 2)
-		println("$this -> $out")
-		for (y in 0 until out.height) {
-			arraycopy(this.data, index(pad, y + pad), out.data, out.index(0, y), out.width)
-		}
-		return out
-	}
+	fun convolvedValidOptimized(f: FloatArray) = convolvedValidOptimized(f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8])
+	fun convolvedValidUnoptimized(f: FloatArray) = convolvedValidUnoptimized(f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8])
 
-	fun convolvedValid(f: FloatArray) = convolvedValid(f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8])
-
-	fun convolvedValid(
+	fun convolvedValidOptimized(
 		a: Float, b: Float, c: Float,
 		d: Float, e: Float, f: Float,
 		g: Float, h: Float, i: Float
 	) = FloatArray2(width - 2, height - 2).apply {
-		setToConvolvedValid(this@FloatArray2, a, b, c, d, e, f, g, h, i)
+		setToConvolvedValidOptimized(this@FloatArray2, a, b, c, d, e, f, g, h, i)
+	}
+
+	fun convolvedValidUnoptimized(
+		a: Float, b: Float, c: Float,
+		d: Float, e: Float, f: Float,
+		g: Float, h: Float, i: Float
+	) = FloatArray2(width - 2, height - 2).apply {
+		setToConvolvedValidUnoptimized(this@FloatArray2, a, b, c, d, e, f, g, h, i)
 	}
 
 	// Optimize!
-	fun setToConvolvedValid(
+	// 24 seconds
+	fun setToConvolvedValidOptimized(
+		src: FloatArray2,
+		a: Float, b: Float, c: Float,
+		d: Float, e: Float, f: Float,
+		g: Float, h: Float, i: Float
+	) {
+		val dst = this
+		assert(dst.width == src.width - 2)
+		assert(dst.height == src.height - 2)
+		val dstData = dst.data
+		val srcData = src.data
+		val srcWidth = src.width
+
+		// @TODO: THREADS
+		for (y in 0 until dst.height) {
+			var sp = src.index(1, y + 1)
+			var dp = dst.index(0, y)
+
+			var _a = srcData[sp - srcWidth - 1]
+			var _b = srcData[sp - srcWidth + 0]
+
+			var _d = srcData[sp - 1]
+			var _e = srcData[sp + 0]
+
+			var _g = srcData[sp + srcWidth - 1]
+			var _h = srcData[sp + srcWidth + 0]
+
+			for (x in 0 until dst.width) {
+				val _c = srcData[sp - srcWidth + 1]
+				val _f = srcData[sp + 1]
+				val _i = srcData[sp + srcWidth + 1]
+
+				dstData[dp] = 0f +
+					a * _a +
+					b * _b +
+					c * _c +
+					d * _d +
+					e * _e +
+					f * _f +
+					g * _g +
+					h * _h +
+					i * _i
+
+				// Shift
+				_a = _b
+				_b = _c
+
+				_d = _e
+				_e = _f
+
+				_g = _h
+				_h = _i
+
+				sp++
+				dp++
+			}
+		}
+	}
+
+	// 30 seconds
+	fun setToConvolvedValidUnoptimized(
 		src: FloatArray2,
 		a: Float, b: Float, c: Float,
 		d: Float, e: Float, f: Float,
