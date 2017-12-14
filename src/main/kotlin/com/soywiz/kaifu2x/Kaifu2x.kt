@@ -122,16 +122,12 @@ suspend fun Model.waifu2xCoreRgba(name: String, image: Bitmap32, components: Lis
 	val model = this
 	val imYCbCr = image.rgbaToYCbCr()
 	val time = measureTimeMillis {
-		System.err.println("Input components: ${components.map { it.toStringYCbCr() }}")
+		System.err.print("Computing relevant components...\r")
+		val acomponents = components.filter { imYCbCr.readComponentf(it).run { !areAllEqualTo(this[0, 0]) } }
 
-		val acomponents = components.filter {
-			imYCbCr.readComponentf(it).run { !areAllEqualTo(this[0, 0]) }
-		}
-
-		System.err.println("Processing components: ${acomponents.map { it.toStringYCbCr() }}")
+		System.err.println("Components: Requested:${components.map { it.toStringYCbCr() }} -> Required:${acomponents.map { it.toStringYCbCr() }}")
 
 		val startTime = System.currentTimeMillis()
-
 		model.waifu2xYCbCrInplace(imYCbCr, acomponents, parallel = parallel) { current, total ->
 			val currentTime = System.currentTimeMillis()
 			val ratio = current.toDouble() / total.toDouble()
@@ -158,9 +154,12 @@ suspend fun Model.waifu2xCoreRgba(name: String, image: Bitmap32, components: Lis
 //}
 
 fun Model.waifu2xYCbCrInplace(imYCbCr: Bitmap32, acomponents: List<ColorComponent>, parallel: Boolean = true, progressReport: (Int, Int) -> Unit = { cur, total -> }): Bitmap32 {
+	val nthreads = if (parallel) Runtime.getRuntime().availableProcessors() else 1
+	System.err.println("Processing Threads: $nthreads")
+
 	for ((index, c) in acomponents.withIndex()) {
 		val data = imYCbCr.readComponentf(c)
-		val result = waifu2xCore(data, parallel = parallel) { current, total ->
+		val result = waifu2xCore(data, nthreads = nthreads) { current, total ->
 			val rcurrent = index * total + current
 			val rtotal = total * acomponents.size
 			progressReport(rcurrent, rtotal)
@@ -170,15 +169,11 @@ fun Model.waifu2xYCbCrInplace(imYCbCr: Bitmap32, acomponents: List<ColorComponen
 	return imYCbCr
 }
 
-fun Model.waifu2xCore(map: FloatArray2, parallel: Boolean = true, progressReport: (Int, Int) -> Unit = { cur, total -> }): FloatArray2 {
+fun Model.waifu2xCore(map: FloatArray2, nthreads: Int, progressReport: (Int, Int) -> Unit = { cur, total -> }): FloatArray2 {
 	var i_planes = arrayOf(map.paddedEdge(steps.size))
 	val total = steps.map { it.nInputPlane * it.nOutputPlane }.sum()
 	var current = 0
-	val nthreads = if (parallel) Runtime.getRuntime().availableProcessors() else 1
 	val tpool = Executors.newFixedThreadPool(nthreads)
-
-	System.err.println()
-	System.err.println("waifu2x.core: Processing Threads: $nthreads")
 
 	//progressReport(0, total)
 
