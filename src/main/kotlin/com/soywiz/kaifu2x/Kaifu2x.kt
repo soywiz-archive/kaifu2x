@@ -46,7 +46,7 @@ object Kaifu2xCli {
 		if (args.size < 2) helpAndExit()
 
 		var parallel = true
-		var components = listOf(ColorComponent.RED, ColorComponent.ALPHA)
+		var components = listOf(ColorComponent.Y, ColorComponent.A)
 		var inputName: String? = null
 		var outputName: String? = null
 		var noiseReduction: Int = 0
@@ -65,8 +65,8 @@ object Kaifu2xCli {
 				"-n3" -> noiseReduction = 3
 				"-s1" -> scale = 1
 				"-s2" -> scale = 2
-				"-cl" -> components = listOf(ColorComponent.RED)
-				"-cla" -> components = listOf(ColorComponent.RED, ColorComponent.ALPHA)
+				"-cl" -> components = listOf(ColorComponent.Y)
+				"-cla" -> components = listOf(ColorComponent.Y, ColorComponent.A)
 				"-clca" -> components = ColorComponent.ALL.toList()
 				else -> {
 					if (c.startsWith("-")) invalidOp("Unknown switch $c")
@@ -107,11 +107,11 @@ object Kaifu2xCli {
 
 // Exposed functions
 object Kaifu2x {
-	suspend fun noiseReductionRgba(image: Bitmap32, noise: Int, components: List<ColorComponent>, parallel: Boolean): Bitmap32 {
+	suspend fun noiseReductionRgba(image: Bitmap32, noise: Int, components: List<ColorComponent> = listOf(ColorComponent.Y, ColorComponent.A), parallel: Boolean = true): Bitmap32 {
 		return getNoiseModel(noise)?.waifu2xCoreRgba("noise$noise", image, components, parallel) ?: image
 	}
 
-	suspend fun scaleRgba(image: Bitmap32, scale: Int, components: List<ColorComponent>, parallel: Boolean): Bitmap32 {
+	suspend fun scaleRgba(image: Bitmap32, scale: Int, components: List<ColorComponent> = listOf(ColorComponent.Y, ColorComponent.A), parallel: Boolean = true): Bitmap32 {
 		return when (scale) {
 			1 -> image
 			2 -> getScale2xModel().waifu2xCoreRgba("scale$scale", image.scaleNearest(scale, scale), components, parallel)

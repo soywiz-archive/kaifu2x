@@ -1,8 +1,9 @@
+import java.nio.file.CopyOption
 import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.PosixFilePermission
 
 buildscript {
-    ext.version = '0.1.0'
     ext.kotlin_version = '1.2.10'
     ext.korio_version = '0.18.0'
 
@@ -17,7 +18,7 @@ buildscript {
 }
 
 group 'com.soywiz'
-version version
+version '0.1.0'
 
 apply plugin: 'kotlin'
 apply plugin: 'maven'
@@ -51,7 +52,6 @@ kotlin {
 task fatJarCore(type: Jar) {
     manifest {
         attributes 'Implementation-Title': 'Kaifu2x',
-                'Implementation-Version': "$version",
                 'Main-Class': 'com.soywiz.kaifu2x.Kaifu2xCli'
     }
     baseName = project.name + '-all'
@@ -63,13 +63,18 @@ task fatJarLauncher() {
     doLast {
         File launcherFile = new File(rootProject.buildDir, "libs/kaifu2x")
         launcherFile.write('java -jar $0-all.jar $*')
-
-
         Files.setPosixFilePermissions(launcherFile.toPath(), Files.getPosixFilePermissions(launcherFile.toPath()) + [PosixFilePermission.OWNER_EXECUTE, PosixFilePermission.GROUP_EXECUTE, PosixFilePermission.OTHERS_EXECUTE].toSet())
     }
 }
 
 task fatJar(dependsOn: [fatJarCore, fatJarLauncher]) {
+}
+
+task installCli(dependsOn: fatJar) {
+    doLast {
+        Files.copy(new File(rootProject.buildDir, "libs/kaifu2x").toPath(), new File("/usr/local/bin/kaifu2x").toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES)
+        Files.copy(new File(rootProject.buildDir, "libs/kaifu2x-all.jar").toPath(), new File("/usr/local/bin/kaifu2x-all.jar").toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES)
+    }
 }
 
 task javadoc2(type: Javadoc) {
@@ -149,4 +154,7 @@ publishing {
             version "$project.version"
         }
     }
+}
+
+task deploy(dependsOn: ['install', 'uploadArchives']) {
 }

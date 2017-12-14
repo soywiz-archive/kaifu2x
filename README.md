@@ -9,7 +9,7 @@ And it includes code to process convulational 3x3 kernels on a float matrix.
 
 ![](/docs/kaifu2x.side2side.png)
 
-### How to use?
+### How to use CLI?
 
 You can grab a precompiled jar from [github's the Releases page](https://github.com/soywiz/kaifu2x/releases/)
 
@@ -17,6 +17,29 @@ You can grab a precompiled jar from [github's the Releases page](https://github.
 ./gradlew fatJar
 cd build/libs
 java -jar kaifu2x-all.jar -n0 -s2 input.png output.png
+```
+
+Install kaifu2x binary in /usr/local/bin:
+
+```
+./gradlew installCli
+```
+
+### How to use as library?
+
+It is published to maven central. In your `build.gradle` (or maven equivalent):
+```
+compile "com.soywiz:kaifu2x:0.1.0"
+```
+
+Exposed API:
+```
+package com.soywiz.kaifu2x
+
+object Kaifu2x {
+	suspend fun noiseReductionRgba(image: Bitmap32, noise: Int, components: List<ColorComponent> = listOf(ColorComponent.Y, ColorComponent.A), parallel: Boolean = true): Bitmap32
+	suspend fun scaleRgba(image: Bitmap32, scale: Int, components: List<ColorComponent> = listOf(ColorComponent.Y, ColorComponent.A), parallel: Boolean = true): Bitmap32
+}
 ```
 
 ### Help

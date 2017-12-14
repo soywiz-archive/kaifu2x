@@ -49,6 +49,11 @@ enum class ColorComponent(val index: Int) {
 	}
 }
 
+val ColorComponent.Companion.Y get() = ColorComponent.RED
+val ColorComponent.Companion.Cb get() = ColorComponent.GREEN
+val ColorComponent.Companion.Cr get() = ColorComponent.BLUE
+val ColorComponent.Companion.A get() = ColorComponent.ALPHA
+
 fun Bitmap32.writeComponent(dstCmp: ColorComponent, from: Bitmap32, srcCmp: ColorComponent) {
 	val fdata = from.data
 	for (n in 0 until area) {
