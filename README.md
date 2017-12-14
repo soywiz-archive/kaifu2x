@@ -30,7 +30,11 @@ So for waifu2x we are just using this:
 
 ![](/docs/kaifu2x.YYYA.png)
 
-NOTE: We can process each component independently, specially the alpha channel. But we are not going to do this for now.
+NOTE: We can process each component independently, specially the alpha channel. But we are going to focus on luminance which provides most information.
+
+#### Waifu2x input
+
+The input of waifu2x is a pixelated 2x2 grayscale image represented as floats in the range of [0f, 1f]
 
 ### Optimizations done
 
@@ -86,3 +90,11 @@ Since each of the 7 steps depends on the previous ones, that part is not paralle
 So I have tried to parallelize the convolution work in a per row basis. But there were too much calls to this
 so the overhead was big.
 In the end I placed the parallelization in a previous step.
+
+#### Future optimizations
+
+Since we can't do SIMD optimizations manually in the JVM. And there are no guarantees that the JVM uses SIMD
+instructions, our only option here is to use libraries for parallelizing mathematical operations either in the CPU
+and the GPU or even with shaders (GlSl for example).
+That's probably out of scope for this library (at least at this point), since the aim here is to
+illustrate how does this works internally and to provide a portable implementation that works out of the box on mac.
