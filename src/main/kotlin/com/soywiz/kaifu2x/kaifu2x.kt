@@ -7,6 +7,7 @@ import com.soywiz.korim.bitmap.Bitmap32
 import com.soywiz.korim.color.RGBA
 import com.soywiz.korim.format.*
 import com.soywiz.korio.Korio
+import com.soywiz.korio.error.invalidArg
 import com.soywiz.korio.error.invalidOp
 import com.soywiz.korio.lang.ASCII
 import com.soywiz.korio.lang.toString
@@ -28,10 +29,11 @@ object Kaifu2x {
 	@JvmStatic
 	fun main(args: Array<String>) = Korio {
 		if (args.size < 2) {
-			System.err.println("Usage: kaifu2x [-jl] [-jla] <input.png> <output.png>")
+			System.err.println("Usage: kaifu2x [-mt] [-jl] [-jla] <input.png> <output.png>")
 			System.exit(-1)
 		}
 
+		var multiThread = false
 		var justLuminance = false
 		var justLuminanceAlpha = false
 		var inputName: String? = null
@@ -41,6 +43,7 @@ object Kaifu2x {
 		while (argsR.isNotEmpty()) {
 			val c = argsR.removeFirst()
 			when (c) {
+				"-mt" -> multiThread = true
 				"-jl" -> justLuminance = true
 				"-jla" -> justLuminanceAlpha = true
 				else -> {
@@ -88,7 +91,7 @@ object Kaifu2x {
 
 			for ((index, c) in acomponents.withIndex()) {
 				val data = imYCbCr.readComponentf(c)
-				val result = model.waifu2x(data) { current, total ->
+				val result = model.waifu2x(data, parallel = multiThread) { current, total ->
 					val currentTime = System.currentTimeMillis()
 					val rcurrent = index * total + current
 					val rtotal = total * acomponents.size
@@ -293,17 +296,24 @@ fun Model.waifu2x(map: FloatArray2, parallel: Boolean = true, progressReport: (I
 				o_planes += sum(partials) + bias
 			} else {
 				// 24 seconds!
-				var partial: FloatArray2? = null
+				var first = true
+
+				val fplane = planes[0]
+				val partial = FloatArray2(fplane.width - 2, fplane.height - 2)
+				val p = FloatArray2(fplane.width - 2, fplane.height - 2)
+
 				for ((ip, kernel) in planes.zip(weights)) {
-					val p = ip.convolvedValidOptimized(kernel)
-					if (partial == null) {
-						partial = p
+					p.setToConvolvedValidOptimized(ip, kernel)
+					if (first) {
+						partial.setTo(p)
+						first = false
 					} else {
-						partial += p
+						partial.setToAdd(partial, p)
 					}
 					current++
 				}
-				o_planes += partial!! + bias
+				partial.setToAdd(partial, bias)
+				o_planes += partial
 			}
 
 			progressReport(current, total)
@@ -395,6 +405,7 @@ class FloatArray2(val width: Int, val height: Int, val data: FloatArray = FloatA
 		}
 	}
 
+	fun setTo(r: FloatArray2) = run { for (n in 0 until area) data[n] = r.data[n] }
 	fun setToAdd(l: FloatArray2, r: FloatArray2) = run { for (n in 0 until area) data[n] = l.data[n] + r.data[n] }
 	fun setToAdd(l: FloatArray2, r: Float) = run { for (n in 0 until area) data[n] = l.data[n] + r }
 	fun setToMul(l: FloatArray2, r: Float) = run { for (n in 0 until area) data[n] = l.data[n] * r }
@@ -438,6 +449,9 @@ class FloatArray2(val width: Int, val height: Int, val data: FloatArray = FloatA
 		setToConvolvedValidUnoptimized(this@FloatArray2, a, b, c, d, e, f, g, h, i)
 	}
 
+	fun setToConvolvedValidOptimized(src: FloatArray2, f: FloatArray) =
+		setToConvolvedValidOptimized(src, f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8])
+
 	// Optimize!
 	// 24 seconds
 	fun setToConvolvedValidOptimized(
@@ -447,8 +461,9 @@ class FloatArray2(val width: Int, val height: Int, val data: FloatArray = FloatA
 		g: Float, h: Float, i: Float
 	) {
 		val dst = this
-		assert(dst.width == src.width - 2)
-		assert(dst.height == src.height - 2)
+		if ((dst.width != src.width - 2) || (dst.height != src.height - 2)) {
+			invalidArg("Invalid image sizes")
+		}
 		val dstData = dst.data
 		val srcData = src.data
 		val srcWidth = src.width
