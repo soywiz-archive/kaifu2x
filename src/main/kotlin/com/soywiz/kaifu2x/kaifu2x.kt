@@ -18,7 +18,7 @@ import com.soywiz.korio.vfs.PathInfo
 import com.soywiz.korio.vfs.resourcesVfs
 import java.io.File
 import java.util.*
-import java.util.stream.Collectors
+import java.util.concurrent.Executors
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.system.measureTimeMillis
@@ -29,11 +29,11 @@ object Kaifu2x {
 	@JvmStatic
 	fun main(args: Array<String>) = Korio {
 		if (args.size < 2) {
-			System.err.println("Usage: kaifu2x [-mt] [-jl] [-jla] <input.png> <output.png>")
+			System.err.println("Usage: kaifu2x [-st] [-mt] [-jl] [-jla] <input.png> <output.png>")
 			System.exit(-1)
 		}
 
-		var multiThread = false
+		var multiThread = true
 		var justLuminance = false
 		var justLuminanceAlpha = false
 		var inputName: String? = null
@@ -43,6 +43,7 @@ object Kaifu2x {
 		while (argsR.isNotEmpty()) {
 			val c = argsR.removeFirst()
 			when (c) {
+				"-st" -> multiThread = false
 				"-mt" -> multiThread = true
 				"-jl" -> justLuminance = true
 				"-jla" -> justLuminanceAlpha = true
@@ -285,53 +286,75 @@ fun Model.waifu2x(map: FloatArray2, parallel: Boolean = true, progressReport: (I
 	var i_planes = arrayOf(map.paddedEdge(steps.size))
 	val total = steps.map { it.nInputPlane * it.nOutputPlane }.sum()
 	var current = 0
-	progressReport(0, total)
+	val nthreads = if (parallel) Thread.activeCount() * 2 else 1
+
+	val tpool = Executors.newFixedThreadPool(nthreads)
+
+	System.err.println("Processing Threads: $nthreads")
+
+	//progressReport(0, total)
+
 	for (step in steps) {
 		val fip = i_planes[0]
+		val owidth = fip.width - 2
+		val oheight = fip.height - 2
 		// Do all allocations here for this step!
-		val o_planes = Array(step.weight.size) { FloatArray2(fip.width - 2, fip.height - 2) }
-		val p = FloatArray2(fip.width - 2, fip.height - 2)
+		val o_planes = Array(step.weight.size) { FloatArray2(owidth, oheight) }
+		val tpartials = Array(nthreads) { FloatArray2(owidth, oheight) }
+		val pList = Array(nthreads) { FloatArray2(owidth, oheight) }
 
 		for (index in 0 until step.weight.size) {
 			val bias = step.bias[index]
 			val weights = step.weight[index]
 
-			if (parallel) {
-				// 12 seconds!
-				val partials = i_planes.zip(weights).parallelStream().map { (ip, kernel) -> ip.convolvedValidOptimized(kernel) }.collect(Collectors.toList()).toTypedArray()
-				current += weights.size
-				o_planes[index] = sum(partials) + bias
-			} else {
-				var first = true
+			val futures = (0 until nthreads).map { threadId ->
+				tpool.submit {
+					var first = true
+					val partial = tpartials[threadId]
+					val p = pList[threadId]
+					for (i in threadId until weights.size step nthreads) {
+						val ip = i_planes[i]
+						val kernel = weights[i]
 
-				val partial = o_planes[index]
+						p.setToConvolvedValidOptimized(ip, kernel)
 
-				for (i in 0 until weights.size) {
-					val ip = i_planes[i]
-					val kernel = weights[i]
-
-					p.setToConvolvedValidOptimized(ip, kernel)
-
-					if (first) {
-						partial.setTo(p)
-						first = false
-					} else {
-						partial.setToAdd(partial, p)
+						if (first) {
+							partial.setTo(p)
+							first = false
+						} else {
+							partial.setToAdd(partial, p)
+						}
+						current++
 					}
-					current++
-				}
-
-				partial.setToFunc(partial) {
-					val bit = it + bias
-					max(bit, 0f) + (min(bit, 0f) * 0.1f)
 				}
 			}
+
+			val partial = o_planes[index]
+
+			// Wait all threads and accumulate partial values
+			for (n in 0 until nthreads) {
+				futures[n].get()
+				if (n == 0) {
+					partial.setTo(tpartials[n])
+				} else {
+					partial.setToAdd(partial, tpartials[n])
+				}
+			}
+
+			partial.setToFunc(partial) {
+				val bit = it + bias
+				max(bit, 0f) + (min(bit, 0f) * 0.1f)
+			}
+
 
 			progressReport(current, total)
 		}
 
 		i_planes = o_planes
 	}
+
+	tpool.shutdown()
+
 	return i_planes.first()
 }
 
