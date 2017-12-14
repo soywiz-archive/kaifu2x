@@ -35,6 +35,8 @@ NOTE: We can process each component independently, specially the alpha channel. 
 
 #### Sliding memory reading for convolution kernel
 
+Reduced from 30 seconds to 24 seconds in a MBP13@2.4ghz
+
 The initial optimization I have done to the code is to reduce memory reading at the [convolution kernel](https://docs.gimp.org/en/plug-in-convmatrix.html).
 Waifu2x model uses a convolution matrix of 3x3.
 For each single component, it gather 3x3 near components, multiply them by weight matrix and sum the result.
@@ -74,6 +76,8 @@ In each contiguous step (from left to right) we have 6 values that are the same 
 step, but shifted. So we only have 3 new values that we have to read from memory in each step.
 
 #### Parallelize
+
+Reduced from 24 seconds to 12 seconds in a MBP13@2.4ghz
 
 This one is pretty straight forward: and it is to parallelize work in threads.
 I have tried several places for parallelizing to reduce the overhead.
