@@ -22,9 +22,9 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.system.measureTimeMillis
 
-fun main(args: Array<String>) = Kaifu2x.main(args)
+fun main(args: Array<String>) = Kaifu2xCli.main(args)
 
-object Kaifu2x {
+object Kaifu2xCli {
 	fun help() {
 		System.err.println("Usage: kaifu2x [switches] <input.png> <output.png>")
 		System.err.println("")
@@ -91,8 +91,8 @@ object Kaifu2x {
 		val image = LocalVfs(File(inputFileName)).readBitmapNoNative().toBMP32()
 		System.err.println("Ok")
 
-		val noiseReductedImage = noiseReductionRgba(image, noiseReduction, components, parallel)
-		val scaledImage = scaleRgba(noiseReductedImage, scale, components, parallel)
+		val noiseReductedImage = Kaifu2x.noiseReductionRgba(image, noiseReduction, components, parallel)
+		val scaledImage = Kaifu2x.scaleRgba(noiseReductedImage, scale, components, parallel)
 
 		val outFile = LocalVfs(File(outputFileName)).ensureParents()
 		System.err.print("Writting $outputFileName...")
@@ -103,8 +103,10 @@ object Kaifu2x {
 			System.err.println("WARNING!!: No operation done! Please add -nX or -sX switches to control noise reduction and scaling")
 		}
 	}
+}
 
-	// Exposed functions
+// Exposed functions
+object Kaifu2x {
 	suspend fun noiseReductionRgba(image: Bitmap32, noise: Int, components: List<ColorComponent>, parallel: Boolean): Bitmap32 {
 		return getNoiseModel(noise)?.waifu2xCoreRgba("noise$noise", image, components, parallel) ?: image
 	}
