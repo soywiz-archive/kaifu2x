@@ -1,11 +1,14 @@
 package com.soywiz.kaifu2x
 
+import com.soywiz.klock.TimeSpan
+import com.soywiz.klock.milliseconds
 import com.soywiz.kmem.arraycopy
 import com.soywiz.korim.bitmap.Bitmap
 import com.soywiz.korim.bitmap.Bitmap32
 import com.soywiz.korim.color.RGBA
 import com.soywiz.korim.format.*
 import com.soywiz.korio.Korio
+import com.soywiz.korio.error.invalidOp
 import com.soywiz.korio.lang.ASCII
 import com.soywiz.korio.lang.toString
 import com.soywiz.korio.serialization.json.Json
@@ -21,29 +24,84 @@ import kotlin.system.measureTimeMillis
 fun main(args: Array<String>) = Kaifu2x.main(args)
 
 object Kaifu2x {
-	@JvmStatic fun main(args: Array<String>) = Korio {
+	@JvmStatic
+	fun main(args: Array<String>) = Korio {
 		if (args.size < 2) {
 			System.err.println("Usage: kaifu2x <input.png> <output.png>")
 			System.exit(-1)
 		}
 
+		val inputFileName = args[0]
+		val outputFileName = args[1]
+
 		defaultImageFormats.registerStandard()
 		val model = getModel()
-		val image = LocalVfs(File(args[0])).readBitmapNoNative().toBMP32()
+		System.err.print("Reading $inputFileName...")
+		val image = LocalVfs(File(inputFileName)).readBitmapNoNative().toBMP32()
+		System.err.println("Ok")
 		val im = image.scaleNearest(2, 2)
 		val imYCbCr = im.rgbaToYCbCr()
-		val Y = imYCbCr.get0f()
-		lateinit var result: FloatArray2
 		val time = measureTimeMillis {
-			result = model.waifu2x(Y) { current, total ->
-				System.err.print("\r" + ((current.toDouble() / total.toDouble()) * 100) + "%")
+			val components = ColorComponent.ALL.toList()
+
+			System.err.println("Input components: $components")
+
+			val acomponents = components.filter {
+				imYCbCr.readComponentf(it).run { !areAllEqualTo(this[0, 0]) }
+			}
+
+			System.err.println("Processing components: $acomponents")
+
+			var startTime = System.currentTimeMillis()
+
+			for ((index, c) in acomponents.withIndex()) {
+				val data = imYCbCr.readComponentf(c)
+				val result = model.waifu2x(data) { current, total ->
+					var currentTime = System.currentTimeMillis()
+					val rcurrent = index * total + current
+					val rtotal = total * acomponents.size
+					val ratio = rcurrent.toDouble() / rtotal.toDouble()
+					val elapsedMs = (currentTime - startTime)
+					val estimatedMs = elapsedMs * (1.0 / ratio)
+					System.err.print(
+						"\rProgress: %.1f%% - Elapsed: %s - Remaining: %s".format(
+							(ratio * 100).toFloat(),
+							toTimeString(elapsedMs.toInt()),
+							toTimeString((estimatedMs - elapsedMs).toInt())
+						)
+					)
+				}
+				imYCbCr.writeComponentf(c, result)
 			}
 		}
+		System.err.println()
 		System.err.println("Took: " + time.toDouble() / 1000 + " seconds")
-		val out: Bitmap = imYCbCr.set0f(result).yCbCrToRgba()
-		val outFile = LocalVfs(File(args[1])).ensureParents()
+		val out: Bitmap = imYCbCr.yCbCrToRgba()
+		val outFile = LocalVfs(File(outputFileName)).ensureParents()
+		System.err.print("Writting $outputFileName...")
 		out.writeTo(outFile)
+		System.err.println("Ok")
 	}
+}
+
+fun TimeSpan.toTimeString(components: Int = 3): String = toTimeString(milliseconds, components)
+
+fun toTimeString(totalMilliseconds: Int, components: Int = 3): String {
+	var timeUnit = totalMilliseconds / 1000
+
+	if (components == 1) return "%02d".format(timeUnit)
+
+	val seconds = timeUnit % 60
+	timeUnit /= 60
+
+	if (components == 2) return "%02d:%02d".format(timeUnit, seconds)
+
+	val minutes = timeUnit % 60
+	timeUnit /= 60
+
+	if (components == 3) return "%02d:%02d:%02d".format(timeUnit, minutes, seconds)
+
+	TODO("Just supported 3 components")
 }
 
 object Example {
@@ -132,10 +190,6 @@ fun Int.yCbCrToRgba(): Int {
 fun Bitmap32.rgbaToYCbCr(): Bitmap32 = Bitmap32(width, height).apply { for (n in 0 until area) this.data[n] = this@rgbaToYCbCr.data[n].rgbaToYCbCr() }
 fun Bitmap32.yCbCrToRgba(): Bitmap32 = Bitmap32(width, height).apply { for (n in 0 until area) this.data[n] = this@yCbCrToRgba.data[n].yCbCrToRgba() }
 
-fun Bitmap32.get0f(): FloatArray2 = FloatArray2(width, height).apply { for (n in 0 until area) this.data[n] = RGBA.getRf(this@get0f.data[n]) }
-fun Bitmap32.get1f(): FloatArray2 = FloatArray2(width, height).apply { for (n in 0 until area) this.data[n] = RGBA.getGf(this@get1f.data[n]) }
-fun Bitmap32.get2f(): FloatArray2 = FloatArray2(width, height).apply { for (n in 0 until area) this.data[n] = RGBA.getBf(this@get2f.data[n]) }
-
 enum class ColorComponent(val index: Int) {
 	RED(0), GREEN(1), BLUE(2), ALPHA(3);
 
@@ -144,6 +198,11 @@ enum class ColorComponent(val index: Int) {
 
 	fun extract(rgba: Int): Int = (rgba ushr shift) and 0xFF
 	fun insert(rgba: Int, value: Int): Int = (rgba and clearMask) or ((value and 0xFF) shl shift)
+
+	companion object {
+		val ALL = values()
+		operator fun get(index: Int) = ALL[index]
+	}
 }
 
 fun Bitmap32.writeComponent(dstCmp: ColorComponent, from: Bitmap32, srcCmp: ColorComponent) {
@@ -153,9 +212,29 @@ fun Bitmap32.writeComponent(dstCmp: ColorComponent, from: Bitmap32, srcCmp: Colo
 	}
 }
 
-fun Bitmap32.set0f(f: FloatArray2): Bitmap32 = this.apply {
-	for (n in 0 until area) this.data[n] = (this.data[n] and 0x000000FF.inv()) or (f.data[n].clamp(0f, 1f) * 255).toInt()
+fun Bitmap32.writeComponentf(dstCmp: ColorComponent, from: FloatArray2) = this.apply {
+	val fdata = from.data
+	for (n in 0 until area) {
+		data[n] = dstCmp.insert(data[n], (fdata[n].clamp(0f, 1f) * 255).toInt())
+	}
 }
+
+fun Bitmap32.readComponentf(cmp: ColorComponent, dst: FloatArray2 = FloatArray2(width, height)): FloatArray2 {
+	val src = this
+	val sdata = this.data
+	val ddata = dst.data
+	for (n in 0 until area) {
+		ddata[n] = cmp.extract(sdata[n]).toFloat() / 255f
+	}
+	return dst
+}
+
+fun Bitmap32.get0f(): FloatArray2 = readComponentf(ColorComponent.RED)
+fun Bitmap32.get1f(): FloatArray2 = readComponentf(ColorComponent.GREEN)
+fun Bitmap32.get2f(): FloatArray2 = readComponentf(ColorComponent.BLUE)
+fun Bitmap32.get3f(): FloatArray2 = readComponentf(ColorComponent.ALPHA)
+
+fun Bitmap32.set0f(f: FloatArray2): Bitmap32 = writeComponentf(ColorComponent.RED, f)
 
 fun Bitmap32.scaleNearest(sx: Int, sy: Int): Bitmap32 {
 	val out = Bitmap32(width * sx, height * sy)
@@ -436,6 +515,11 @@ class FloatArray2(val width: Int, val height: Int, val data: FloatArray = FloatA
 				dp++
 			}
 		}
+	}
+
+	fun areAllEqualTo(v: Float): Boolean {
+		for (n in 0 until area) if (data[n] != v) return false
+		return true
 	}
 
 	override fun toString(): String = "com.soywiz.kaifu2x.FloatArray2($width, $height)"
