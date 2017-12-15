@@ -21,19 +21,23 @@ import java.util.*
 import java.util.concurrent.Executors
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.system.exitProcess
 import kotlin.system.measureTimeMillis
 
 fun main(args: Array<String>) = Kaifu2xCli.main(args)
 
 object Kaifu2xCli {
 	fun help() {
+		System.err.println("kaifu2x - $KAIFU2X_VERSION - 2017")
+		System.err.println("")
 		System.err.println("Usage: kaifu2x [switches] <input.png> <output.png>")
 		System.err.println("")
 		System.err.println("Available switches:")
 		System.err.println("  -h        - Displays this help")
+		System.err.println("  -v        - Displays version")
 		System.err.println("  -n[0-3]   - Noise reduction [default to 0 (no noise reduction)]")
 		System.err.println("  -s[1-2]   - Scale level 1=1x, 2=2x [default to 1 (no scale)]")
-		System.err.println("  -q[0-100] - The quality of the output (JPG, PNG)")
+		System.err.println("  -q[0-100] - The quality of the output (JPG, PNG) [default=100]")
 		System.err.println("  -mt       - Multi Threaded [default]")
 		System.err.println("  -st       - Single Threaded")
 		System.err.println("  -cl       - Process Luminance")
@@ -45,8 +49,6 @@ object Kaifu2xCli {
 
 	@JvmStatic
 	fun main(args: Array<String>) = Korio {
-		if (args.size < 2) helpAndExit()
-
 		var parallel = true
 		var components = listOf(BitmapChannel.Y, BitmapChannel.A)
 		var inputName: String? = null
@@ -55,11 +57,14 @@ object Kaifu2xCli {
 		var scale: Int = 1
 		var quality: Int = 100
 
+		if (args.isEmpty()) helpAndExit()
+
 		val argsR = LinkedList(args.toList())
 		while (argsR.isNotEmpty()) {
 			val c = argsR.removeFirst()
 			when {
 				c == "-h" -> helpAndExit()
+				c == "-v" -> run { println(KAIFU2X_VERSION); exitProcess(-1) }
 				c == "-st" -> parallel = false
 				c == "-mt" -> parallel = true
 				c == "-n0" -> noiseReduction = 0
