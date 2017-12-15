@@ -1,7 +1,10 @@
 package com.soywiz.kaifu2x
 
-import com.soywiz.kaifu2x.util.*
-import com.soywiz.korim.bitmap.Bitmap32
+import com.soywiz.kaifu2x.util.FloatArray2
+import com.soywiz.kaifu2x.util.readComponentf
+import com.soywiz.kaifu2x.util.writeComponentf
+import com.soywiz.klock.TimeSpan
+import com.soywiz.korim.bitmap.*
 import com.soywiz.korim.format.*
 import com.soywiz.korio.Korio
 import com.soywiz.korio.error.invalidArg
@@ -9,6 +12,7 @@ import com.soywiz.korio.error.invalidOp
 import com.soywiz.korio.lang.ASCII
 import com.soywiz.korio.lang.toString
 import com.soywiz.korio.serialization.json.Json
+import com.soywiz.korio.util.substr
 import com.soywiz.korio.vfs.LocalVfs
 import com.soywiz.korio.vfs.PathInfo
 import com.soywiz.korio.vfs.resourcesVfs
@@ -26,14 +30,15 @@ object Kaifu2xCli {
 		System.err.println("Usage: kaifu2x [switches] <input.png> <output.png>")
 		System.err.println("")
 		System.err.println("Available switches:")
-		System.err.println("  -h      - Displays this help")
-		System.err.println("  -n[0-3] - Noise reduction [default to 0 (no noise reduction)]")
-		System.err.println("  -s[1-2] - Scale level 1=1x, 2=2x [default to 1 (no scale)]")
-		System.err.println("  -mt     - Multi Threaded [default]")
-		System.err.println("  -st     - Single Threaded")
-		System.err.println("  -cl     - Process Luminance")
-		System.err.println("  -cla    - Process Luminance & Alpha [default]")
-		System.err.println("  -clca   - Process Luminance & Chroma & Alpha")
+		System.err.println("  -h        - Displays this help")
+		System.err.println("  -n[0-3]   - Noise reduction [default to 0 (no noise reduction)]")
+		System.err.println("  -s[1-2]   - Scale level 1=1x, 2=2x [default to 1 (no scale)]")
+		System.err.println("  -q[0-100] - The quality of the output (JPG, PNG)")
+		System.err.println("  -mt       - Multi Threaded [default]")
+		System.err.println("  -st       - Single Threaded")
+		System.err.println("  -cl       - Process Luminance")
+		System.err.println("  -cla      - Process Luminance & Alpha [default]")
+		System.err.println("  -clca     - Process Luminance & Chroma & Alpha")
 	}
 
 	fun helpAndExit(code: Int = -1) = run { help(); System.exit(code) }
@@ -43,28 +48,30 @@ object Kaifu2xCli {
 		if (args.size < 2) helpAndExit()
 
 		var parallel = true
-		var components = listOf(ColorComponent.Y, ColorComponent.A)
+		var components = listOf(BitmapChannel.Y, BitmapChannel.A)
 		var inputName: String? = null
 		var outputName: String? = null
 		var noiseReduction: Int = 0
 		var scale: Int = 1
+		var quality: Int = 100
 
 		val argsR = LinkedList(args.toList())
 		while (argsR.isNotEmpty()) {
 			val c = argsR.removeFirst()
-			when (c) {
-				"-h" -> helpAndExit()
-				"-st" -> parallel = false
-				"-mt" -> parallel = true
-				"-n0" -> noiseReduction = 0
-				"-n1" -> noiseReduction = 1
-				"-n2" -> noiseReduction = 2
-				"-n3" -> noiseReduction = 3
-				"-s1" -> scale = 1
-				"-s2" -> scale = 2
-				"-cl" -> components = listOf(ColorComponent.Y)
-				"-cla" -> components = listOf(ColorComponent.Y, ColorComponent.A)
-				"-clca" -> components = ColorComponent.ALL.toList()
+			when {
+				c == "-h" -> helpAndExit()
+				c == "-st" -> parallel = false
+				c == "-mt" -> parallel = true
+				c == "-n0" -> noiseReduction = 0
+				c == "-n1" -> noiseReduction = 1
+				c == "-n2" -> noiseReduction = 2
+				c == "-n3" -> noiseReduction = 3
+				c == "-s1" -> scale = 1
+				c == "-s2" -> scale = 2
+				c == "-cl" -> components = listOf(BitmapChannel.Y)
+				c == "-cla" -> components = listOf(BitmapChannel.Y, BitmapChannel.A)
+				c == "-clca" -> components = BitmapChannel.ALL.toList()
+				c.startsWith("-q") -> quality = c.substr(2).toIntOrNull() ?: 100
 				else -> {
 					if (c.startsWith("-")) invalidOp("Unknown switch $c")
 					when {
@@ -81,7 +88,7 @@ object Kaifu2xCli {
 
 		val outputExtension = PathInfo(outputFileName).extensionLC
 
-		if (outputExtension != "png") invalidOp("Just supported png outputs but found extension $outputExtension")
+		if (outputExtension !in listOf("png", "jpg")) invalidOp("Just supported 'png' or 'jpg' outputs but found extension $outputExtension")
 
 		defaultImageFormats.registerStandard()
 		System.err.print("Reading $inputFileName...")
@@ -93,7 +100,7 @@ object Kaifu2xCli {
 
 		val outFile = LocalVfs(File(outputFileName)).ensureParents()
 		System.err.print("Writting $outputFileName...")
-		scaledImage.writeTo(outFile)
+		scaledImage.writeTo(outFile, ImageEncodingProps(quality = quality.toDouble() / 100.0))
 		System.err.println("Ok")
 
 		if (noiseReduction == 0 && scale == 1) {
@@ -104,11 +111,11 @@ object Kaifu2xCli {
 
 // Exposed functions
 object Kaifu2x {
-	suspend fun noiseReductionRgba(image: Bitmap32, noise: Int, components: List<ColorComponent> = listOf(ColorComponent.Y, ColorComponent.A), parallel: Boolean = true): Bitmap32 {
+	suspend fun noiseReductionRgba(image: Bitmap32, noise: Int, components: List<BitmapChannel> = listOf(BitmapChannel.Y, BitmapChannel.A), parallel: Boolean = true): Bitmap32 {
 		return getNoiseModel(noise)?.waifu2xCoreRgba("noise$noise", image, components, parallel) ?: image
 	}
 
-	suspend fun scaleRgba(image: Bitmap32, scale: Int, components: List<ColorComponent> = listOf(ColorComponent.Y, ColorComponent.A), parallel: Boolean = true): Bitmap32 {
+	suspend fun scaleRgba(image: Bitmap32, scale: Int, components: List<BitmapChannel> = listOf(BitmapChannel.Y, BitmapChannel.A), parallel: Boolean = true): Bitmap32 {
 		return when (scale) {
 			1 -> image
 			2 -> getScale2xModel().waifu2xCoreRgba("scale$scale", image.scaleNearest(scale, scale), components, parallel)
@@ -117,7 +124,7 @@ object Kaifu2x {
 	}
 }
 
-suspend fun Model.waifu2xCoreRgba(name: String, image: Bitmap32, components: List<ColorComponent>, parallel: Boolean): Bitmap32 {
+suspend fun Model.waifu2xCoreRgba(name: String, image: Bitmap32, components: List<BitmapChannel>, parallel: Boolean): Bitmap32 {
 	//val chunkSize = 128
 	//val chunkSize = 32
 	//val chunkSize = 400
@@ -146,7 +153,7 @@ suspend fun Model.waifu2xCoreRgba(name: String, image: Bitmap32, components: Lis
 				val swidth = min(chunkSize, imYCbCr.width - x)
 				val sheight = min(chunkSize, imYCbCr.height - y)
 				println("CHUNK($x, $y, $swidth, $sheight) [${imYCbCr.width}, ${imYCbCr.height}]")
-				val chunk = imYCbCr.copySliceWithSize2(x, y, swidth, sheight)
+				val chunk = imYCbCr.copySliceWithSize(x, y, swidth, sheight)
 
 				System.gc()
 
@@ -160,8 +167,8 @@ suspend fun Model.waifu2xCoreRgba(name: String, image: Bitmap32, components: Lis
 						"\r[%s] %.1f%% - ELA: %s - ETA: %s - MEM: %s ".format(
 							name,
 							(ratio * 100).toFloat(),
-							toTimeString(elapsedMs.toInt()),
-							toTimeString((estimatedMs - elapsedMs).toInt()),
+							TimeSpan.toTimeString(elapsedMs.toInt()),
+							TimeSpan.toTimeString((estimatedMs - elapsedMs).toInt()),
 							getMemoryUsedString()
 						)
 					)
@@ -171,7 +178,7 @@ suspend fun Model.waifu2xCoreRgba(name: String, image: Bitmap32, components: Lis
 				val dx = if (x == 0) 0 else artifactThresold
 				val dy = if (y == 0) 0 else artifactThresold
 				if ((chunk.width - dx) > 0 && (chunk.height - dy) > 0) {
-					imYCbCr.put(chunk.copySliceWithSize2(dx, dy, chunk.width - dx, chunk.height - dy), x + dx, y + dy)
+					imYCbCr.put(chunk.copySliceWithSize(dx, dy, chunk.width - dx, chunk.height - dy), x + dx, y + dy)
 					//imYCbCr.put(chunk.sliceWithBounds(dx, dy, chunk.width, chunk.height), x + dx, y + dy)
 					//imYCbCr.put(chunk.copySliceWithSize2(artifactThresold, artifactThresold, chunk.width - artifactThresold, chunk.height - artifactThresold), x + artifactThresold, y + artifactThresold)
 				}
@@ -197,7 +204,7 @@ fun getMemoryUsed(): Long {
 //	return result.yCbCrToRgba()
 //}
 
-fun Model.waifu2xYCbCrInplace(imYCbCr: Bitmap32, acomponents: List<ColorComponent>, parallel: Boolean = true, progressReport: (Int, Int) -> Unit = { cur, total -> }): Bitmap32 {
+fun Model.waifu2xYCbCrInplace(imYCbCr: Bitmap32, acomponents: List<BitmapChannel>, parallel: Boolean = true, progressReport: (Int, Int) -> Unit = { cur, total -> }): Bitmap32 {
 	val nthreads = if (parallel) Runtime.getRuntime().availableProcessors() else 1
 	System.err.println("Processing Threads: $nthreads")
 

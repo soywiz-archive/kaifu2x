@@ -4,7 +4,8 @@ import java.nio.file.attribute.PosixFilePermission
 
 buildscript {
     ext.kotlin_version = '1.2.10'
-    ext.korio_version = '0.18.0'
+    ext.korio_version = '0.18.4'
+    ext.korim_version = '0.18.2'
 
     repositories {
         mavenLocal()
@@ -17,7 +18,7 @@ buildscript {
 }
 
 group 'com.soywiz'
-version '0.1.0'
+version '0.2.0'
 
 apply plugin: 'kotlin'
 apply plugin: 'maven'
@@ -25,12 +26,13 @@ apply plugin: 'maven-publish'
 apply plugin: 'signing'
 
 repositories {
+    mavenLocal()
     mavenCentral()
 }
 dependencies {
     compile "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlin_version"
-    compile "com.soywiz:korio:0.18.0"
-    compile "com.soywiz:korim:0.18.0"
+    compile "com.soywiz:korio:$korio_version"
+    compile "com.soywiz:korim:$korim_version"
 }
 compileKotlin {
     kotlinOptions {

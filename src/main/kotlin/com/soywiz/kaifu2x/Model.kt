@@ -1,6 +1,6 @@
 package com.soywiz.kaifu2x
 
-import com.soywiz.kaifu2x.util.DynamicAccess
+import com.soywiz.korio.lang.DynamicAccess
 
 data class Model(val steps: List<Step>) {
 	companion object {

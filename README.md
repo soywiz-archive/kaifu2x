@@ -72,6 +72,9 @@ the size of your uncompressed 2x image in memory.
 
 So a 940x1500 float components, requires 5.5MB, and 256 times: 1408 MB + some extra stuff like temp buffers and so.
 
+**NOTE:** Future versions will use less memory: https://github.com/soywiz/kaifu2x/issues/1 but that will require
+fixing an issue on edges (probably padding-related).
+
 ### How does this work?
 
 #### Nearest neighbour scaling
