@@ -29,7 +29,7 @@ Install kaifu2x binary in /usr/local/bin:
 
 It is published to maven central. In your `build.gradle` (or maven equivalent):
 ```
-compile "com.soywiz:kaifu2x:0.1.0"
+compile "com.soywiz:kaifu2x:0.2.0"
 ```
 
 Exposed API:
@@ -37,25 +37,29 @@ Exposed API:
 package com.soywiz.kaifu2x
 
 object Kaifu2x {
-	suspend fun noiseReductionRgba(image: Bitmap32, noise: Int, components: List<ColorComponent> = listOf(ColorComponent.Y, ColorComponent.A), parallel: Boolean = true): Bitmap32
-	suspend fun scaleRgba(image: Bitmap32, scale: Int, components: List<ColorComponent> = listOf(ColorComponent.Y, ColorComponent.A), parallel: Boolean = true): Bitmap32
+	suspend fun noiseReductionRgba(image: Bitmap32, noise: Int, components: List<BitmapChannel> = listOf(BitmapChannel.Y, BitmapChannel.A), parallel: Boolean = true): Bitmap32
+	suspend fun scaleRgba(image: Bitmap32, scale: Int, components: List<BitmapChannel> = listOf(BitmapChannel.Y, BitmapChannel.A), parallel: Boolean = true): Bitmap32
 }
 ```
 
 ### Help
 
 ```
+kaifu2x - 0.2.0 - 2017
+
 Usage: kaifu2x [switches] <input.png> <output.png>
 
 Available switches:
-  -h      - Displays this help
-  -n[0-3] - Noise reduction [default to 0 (no noise reduction)]
-  -s[1-2] - Scale level 1=1x, 2=2x [default to 1 (no scale)]
-  -mt     - Multi Threaded [default]
-  -st     - Single Threaded
-  -cl     - Process Luminance
-  -cla    - Process Luminance & Alpha [default]
-  -clca   - Process Luminance & Chroma & Alpha
+  -h        - Displays this help
+  -v        - Displays version
+  -n[0-3]   - Noise reduction [default to 0 (no noise reduction)]
+  -s[1-2]   - Scale level 1=1x, 2=2x [default to 1 (no scale)]
+  -q[0-100] - The quality of the output (JPG, PNG) [default=100]
+  -mt       - Multi Threaded [default]
+  -st       - Single Threaded
+  -cl       - Process Luminance
+  -cla      - Process Luminance & Alpha [default]
+  -clca     - Process Luminance & Chroma & Alpha
 ```
 
 ### Some numbers
