@@ -31,9 +31,6 @@ Create a file named `kaifu2x` with this contents:
 ```kotlin
 #!/usr/bin/env kscript
 //DEPS com.soywiz:kaifu2x:0.2.0
-
-import com.soywiz.kaifu2x.Kaifu2xCli
-
 com.soywiz.kaifu2x.Kaifu2xCli.main(args)
 ```
 
@@ -43,6 +40,8 @@ You will need kscript:
 
 * Using [brew](https://brew.sh/) run `brew install holgerbrandl/tap/kscript`
 * Using [sdkman](http://sdkman.io/), install `sdk install kscript`
+
+Note that first time you call the script it will take sometime, but further executions will be faster.
 
 ### How to use as library?
 
