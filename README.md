@@ -25,6 +25,25 @@ Install kaifu2x binary in /usr/local/bin:
 ./gradlew installCli
 ```
 
+### How to use CLI using kscript?
+
+Create a file named `kaifu2x` with this contents:
+```kotlin
+#!/usr/bin/env kscript
+//DEPS com.soywiz:kaifu2x:0.2.0
+
+import com.soywiz.kaifu2x.Kaifu2xCli
+
+com.soywiz.kaifu2x.Kaifu2xCli.main(args)
+```
+
+Run `chmod +x kaifu2x` to give permissions.
+
+You will need kscript:
+
+* Using [brew](https://brew.sh/) run `brew install holgerbrandl/tap/kscript`
+* Using [sdkman](http://sdkman.io/), install `sdk install kscript`
+
 ### How to use as library?
 
 It is published to maven central. In your `build.gradle` (or maven equivalent):
