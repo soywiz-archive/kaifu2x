@@ -30,7 +30,7 @@ Install kaifu2x binary in /usr/local/bin:
 Create a file named `kaifu2x` with this contents:
 ```kotlin
 #!/usr/bin/env kscript
-//DEPS com.soywiz:kaifu2x:0.2.0
+//DEPS com.soywiz:kaifu2x:0.2.1
 com.soywiz.kaifu2x.Kaifu2xCli.main(args)
 ```
 
@@ -42,6 +42,12 @@ You will need kscript:
 * Using [sdkman](http://sdkman.io/), install `sdk install kscript`
 
 Note that first time you call the script it will take sometime, but further executions will be faster.
+
+If you want to try it out without installing anything else than kscript or manually downloading any image:
+```
+brew install holgerbrandl/tap/kscript
+kscript https://raw.githubusercontent.com/soywiz/kaifu2x/8e1e296bfcbb5e06f384e206ef3bb6fcb8ea3dd4/kaifu2x.kscript -s2 https://raw.githubusercontent.com/soywiz/kaifu2x/a9c863d2a181c5906f6e00726f72e93354418086/docs/goku_small_bg.png goku_small_bg.2x.png
+```
 
 ### How to use as library?
 
