@@ -13,10 +13,7 @@ import com.soywiz.korio.lang.ASCII
 import com.soywiz.korio.lang.toString
 import com.soywiz.korio.serialization.json.Json
 import com.soywiz.korio.util.substr
-import com.soywiz.korio.vfs.LocalVfs
-import com.soywiz.korio.vfs.PathInfo
-import com.soywiz.korio.vfs.resourcesVfs
-import java.io.File
+import com.soywiz.korio.vfs.*
 import java.util.*
 import java.util.concurrent.Executors
 import kotlin.math.max
@@ -97,13 +94,13 @@ object Kaifu2xCli {
 
 		defaultImageFormats.registerStandard()
 		System.err.print("Reading $inputFileName...")
-		val image = LocalVfs(File(inputFileName)).readBitmapNoNative().toBMP32()
+		val image = UniversalVfs(inputFileName).readBitmapNoNative().toBMP32()
 		System.err.println("Ok")
 
 		val noiseReductedImage = Kaifu2x.noiseReductionRgba(image, noiseReduction, components, parallel)
 		val scaledImage = Kaifu2x.scaleRgba(noiseReductedImage, scale, components, parallel)
 
-		val outFile = LocalVfs(File(outputFileName)).ensureParents()
+		val outFile = UniversalVfs(outputFileName).ensureParents()
 		System.err.print("Writting $outputFileName...")
 		scaledImage.writeTo(outFile, ImageEncodingProps(quality = quality.toDouble() / 100.0))
 		System.err.println("Ok")
@@ -299,16 +296,15 @@ fun Model.waifu2xCore(map: FloatArray2, nthreads: Int, progressReport: (Int, Int
 }
 
 
-private val modelsVfs by lazy { resourcesVfs["models"] }
-
-private suspend fun readModel(name: String): Model {
+private fun readModel(name: String): Model {
 	System.err.print("Reading $name...")
-	val jsonString = modelsVfs[name].readBytes().toString(ASCII)
+	val jsonString = Kaifu2x::class.java.getResourceAsStream("/models/$name").readBytes().toString(ASCII)
+	//val jsonString = ClassLoader.getSystemClassLoader().getResourceAsStream("models/$name").readBytes().toString(ASCII)
 	val json = Json.decode(jsonString)
 	return Model.parseJson(json).apply {
 		System.err.println("Ok")
 	}
 }
 
-private suspend fun getScale2xModel(): Model = readModel("scale2.0x_model.json")
-private suspend fun getNoiseModel(level: Int): Model? = if (level in 1..3) readModel("noise${level}_model.json") else null
+private fun getScale2xModel(): Model = readModel("scale2.0x_model.json")
+private fun getNoiseModel(level: Int): Model? = if (level in 1..3) readModel("noise${level}_model.json") else null
