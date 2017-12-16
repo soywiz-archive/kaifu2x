@@ -3,7 +3,7 @@ import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.PosixFilePermission
 
 buildscript {
-    ext.projectVersion = '0.2.1-SNAPSHOT'
+    ext.projectVersion = '0.2.1'
     ext.projectName = 'kaifu2x'
     ext.projectGroup = 'com.soywiz'
     ext.projectDesc = 'Port of waifu2x to pure kotlin. Anime-style upscaler and noise reductor based on convolutional neural networks using coffee trained models'
