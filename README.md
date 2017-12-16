@@ -53,7 +53,7 @@ kscript https://raw.githubusercontent.com/soywiz/kaifu2x/8e1e296bfcbb5e06f384e20
 
 It is published to maven central. In your `build.gradle` (or maven equivalent):
 ```
-compile "com.soywiz:kaifu2x:0.2.0"
+compile "com.soywiz:kaifu2x:0.2.1"
 ```
 
 Exposed API:
@@ -69,7 +69,7 @@ object Kaifu2x {
 ### Help
 
 ```
-kaifu2x - 0.2.0 - 2017
+kaifu2x - 0.2.1 - 2017
 
 Usage: kaifu2x [switches] <input.png> <output.png>
 
