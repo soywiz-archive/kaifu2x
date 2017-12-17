@@ -41,8 +41,8 @@ object Kaifu2xCli {
 		System.err.println("  -mt       - Multi Threaded [default]")
 		System.err.println("  -st       - Single Threaded")
 		System.err.println("  -cl       - Process Luminance")
-		System.err.println("  -cla      - Process Luminance & Alpha [default]")
-		System.err.println("  -clca     - Process Luminance & Chroma & Alpha")
+		System.err.println("  -cla      - Process Luminance & Alpha")
+		System.err.println("  -clca     - Process Luminance & Chroma & Alpha [default]")
 	}
 
 	fun helpAndExit(code: Int = -1) = run { help(); System.exit(code) }
@@ -50,7 +50,7 @@ object Kaifu2xCli {
 	@JvmStatic
 	fun main(args: Array<String>) = Korio {
 		var parallel = true
-		var channels = listOf(BitmapChannel.Y, BitmapChannel.A)
+		var channels = BitmapChannel.ALL.toList()
 		var inputName: String? = null
 		var outputName: String? = null
 		var noiseReduction = 0
@@ -100,8 +100,8 @@ object Kaifu2xCli {
 		val image = UniversalVfs(inputFileName).readBitmapNoNative().toBMP32()
 		System.err.println("Ok")
 
-		val noiseReductedImage = Kaifu2x.noiseReductionRgba(image, noiseReduction, channels, parallel)
-		val scaledImage = Kaifu2x.scaleRgba(noiseReductedImage, scale, channels, parallel)
+		val noiseReductedImage = Kaifu2x.noiseReductionRgba(image, noiseReduction, channels, parallel, chunkSize = chunkSize)
+		val scaledImage = Kaifu2x.scaleRgba(noiseReductedImage, scale, channels, parallel, chunkSize = chunkSize)
 
 		val outFile = UniversalVfs(outputFileName).ensureParents()
 		System.err.print("Writting $outputFileName...")
