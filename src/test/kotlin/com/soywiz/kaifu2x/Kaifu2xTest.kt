@@ -1,12 +1,17 @@
 package com.soywiz.kaifu2x
 
+import com.soywiz.korim.bitmap.A
 import com.soywiz.korim.bitmap.Bitmap32
 import com.soywiz.korim.bitmap.BitmapChannel
+import com.soywiz.korim.bitmap.Y
+import com.soywiz.korim.format.PNG
 import com.soywiz.korim.format.defaultImageFormats
 import com.soywiz.korim.format.readBitmap
 import com.soywiz.korim.format.registerStandard
 import com.soywiz.korio.async.syncTest
+import com.soywiz.korio.crypto.toBase64
 import com.soywiz.korio.error.invalidOp
+import com.soywiz.korio.vfs.VfsFile
 import com.soywiz.korio.vfs.resourcesVfs
 import org.junit.Test
 import kotlin.math.log10
@@ -18,15 +23,36 @@ class Kaifu2xTest {
 		defaultImageFormats.registerStandard()
 	}
 
-	@Test
-	fun testScale2x() = syncTest {
-		val input = resourcesVfs["goku_small_bg.png"].readBitmap().toBMP32()
-		val expected = resourcesVfs["goku_small_bg.2x.png"].readBitmap().toBMP32()
-		val result = Kaifu2x.scaleRgba(input, 2, channels = BitmapChannel.ALL.toList())
-		val psnr = PSNR(expected, result)
-		val psnrMin = 50.0
+	private fun testScale2x(input: VfsFile, expected: VfsFile, vararg channels: BitmapChannel, psnrMin: Double = 50.0) = syncTest {
+		val inputBmp = input.readBitmap().toBMP32()
+		val expectedBmp = expected.readBitmap().toBMP32()
+		val result = Kaifu2x.scaleRgba(inputBmp, 2, channels = channels.toList(), output = null)
+		val psnr = PSNR(expectedBmp, result)
 		// 0.5 dB increments are considered noticeable
+		if (psnr < psnrMin) {
+			println("Expected:" + PNG.encode(expectedBmp).toBase64())
+			println("Result:" + PNG.encode(result).toBase64())
+		}
 		assertTrue(psnr >= psnrMin, "PSNR was $psnr but we need it to be $psnrMin dB or better")
+
+	}
+
+	@Test
+	fun testScale2xYCbCrA() {
+		testScale2x(
+			resourcesVfs["goku_small_bg.png"],
+			resourcesVfs["goku_small_bg.2x.ycbcra.png"],
+			*BitmapChannel.ALL
+		)
+	}
+
+	@Test
+	fun testScale2xYA() {
+		testScale2x(
+			resourcesVfs["goku_small_bg.png"],
+			resourcesVfs["goku_small_bg.2x.ya.png"],
+			BitmapChannel.Y, BitmapChannel.A
+		)
 	}
 }
 

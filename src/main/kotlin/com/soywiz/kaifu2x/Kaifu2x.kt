@@ -15,6 +15,7 @@ import com.soywiz.korio.lang.toString
 import com.soywiz.korio.serialization.json.Json
 import com.soywiz.korio.util.substr
 import com.soywiz.korio.vfs.*
+import java.io.PrintStream
 import java.util.*
 import java.util.concurrent.Executors
 import kotlin.math.max
@@ -115,31 +116,31 @@ object Kaifu2xCli {
 
 // Exposed functions
 object Kaifu2x {
-	suspend fun noiseReductionRgba(image: Bitmap32, noise: Int, channels: List<BitmapChannel> = listOf(BitmapChannel.Y, BitmapChannel.A), parallel: Boolean = true, chunkSize: Int = 128): Bitmap32 {
-		return getNoiseModel(noise)?.waifu2xCoreRgba("noise$noise", image, channels, parallel, chunkSize) ?: image
+	suspend fun noiseReductionRgba(image: Bitmap32, noise: Int, channels: List<BitmapChannel> = listOf(BitmapChannel.Y, BitmapChannel.A), parallel: Boolean = true, chunkSize: Int = 128, output: PrintStream? = System.err): Bitmap32 {
+		return getNoiseModel(noise, output)?.waifu2xCoreRgba("noise$noise", image, channels, parallel, chunkSize, output) ?: image
 	}
 
-	suspend fun scaleRgba(image: Bitmap32, scale: Int, channels: List<BitmapChannel> = listOf(BitmapChannel.Y, BitmapChannel.A), parallel: Boolean = true, chunkSize: Int = 128): Bitmap32 {
+	suspend fun scaleRgba(image: Bitmap32, scale: Int, channels: List<BitmapChannel> = listOf(BitmapChannel.Y, BitmapChannel.A), parallel: Boolean = true, chunkSize: Int = 128, output: PrintStream? = System.err): Bitmap32 {
 		return when (scale) {
 			1 -> image
-			2 -> getScale2xModel().waifu2xCoreRgba("scale$scale", image.scaleNearest(scale, scale), channels, parallel, chunkSize)
+			2 -> getScale2xModel(output).waifu2xCoreRgba("scale$scale", image.scaleNearest(scale, scale), channels, parallel, chunkSize, output)
 			else -> invalidArg("Invalid scale $scale")
 		}
 	}
 }
 
-suspend fun Model.waifu2xCoreRgba(name: String, image: Bitmap32, channels: List<BitmapChannel>, parallel: Boolean, chunkSize: Int): Bitmap32 {
+suspend fun Model.waifu2xCoreRgba(name: String, image: Bitmap32, channels: List<BitmapChannel>, parallel: Boolean, chunkSize: Int, output: PrintStream?): Bitmap32 {
 	val model = this
 	val imYCbCr = image.rgbaToYCbCr()
 	val padding = this.padding
 
 	val time = measureTimeMillis {
-		System.err.print("Computing relevant channels...\r")
+		output?.print("Computing relevant channels...\r")
 		val achannels = channels.filter { imYCbCr.readChannelf(it).run { !areAllEqualTo(this[0, 0]) } }
 
-		System.err.println("Channels: Requested${channels.map { it.toStringYCbCr() }} -> Required${achannels.map { it.toStringYCbCr() }}")
+		output?.println("Channels: Requested${channels.map { it.toStringYCbCr() }} -> Required${achannels.map { it.toStringYCbCr() }}")
 		val nthreads = if (parallel) Runtime.getRuntime().availableProcessors() else 1
-		System.err.println("Chunk size: $chunkSize, Threads: $nthreads")
+		output?.println("Chunk size: $chunkSize, Threads: $nthreads")
 
 		var processedPixels = 0
 		val totalPixels = imYCbCr.area
@@ -158,6 +159,7 @@ suspend fun Model.waifu2xCoreRgba(name: String, image: Bitmap32, channels: List<
 
 				val chunkPixels = (inPaddedChunk.width - padding * 2) * (inPaddedChunk.height - padding * 2)
 				val outUnpaddedChunk = model.waifu2xYCbCrNoPadding(inPaddedChunk, achannels, nthreads = nthreads) { current, total ->
+					if (output == null) return@waifu2xYCbCrNoPadding
 					val currentTime = System.currentTimeMillis()
 					val localRatio = current.toDouble() / total.toDouble()
 					val localProcessedPixels = (chunkPixels * localRatio).toInt()
@@ -165,7 +167,7 @@ suspend fun Model.waifu2xCoreRgba(name: String, image: Bitmap32, channels: List<
 					val ratio = totalProcessedPixels.toDouble() / totalPixels.toDouble()
 					val elapsedMs = (currentTime - startTime)
 					val estimatedMs = elapsedMs * (1.0 / ratio)
-					System.err.print(
+					output.print(
 						"\r[%s] %.1f%% - ELA: %s - ETA: %s - MEM: %s ".format(
 							name,
 							(ratio * 100).toFloat(),
@@ -176,15 +178,12 @@ suspend fun Model.waifu2xCoreRgba(name: String, image: Bitmap32, channels: List<
 					)
 				}
 				processedPixels += chunkPixels
-				//System.err.println()
-
-				//println("outUnpaddedChunk: $outUnpaddedChunk -> $x, $y")
 				imYCbCr.put(outUnpaddedChunk, x, y)
 			}
 		}
 	}
-	System.err.println()
-	System.err.println("Took: " + time.toDouble() / 1000 + " seconds")
+	output?.println()
+	output?.println("Took: " + time.toDouble() / 1000 + " seconds")
 	return imYCbCr.yCbCrToRgba()
 }
 
@@ -287,15 +286,15 @@ fun Model.waifu2xCore(map: FloatArray2, nthreads: Int, addPadding: Boolean = tru
 }
 
 
-private fun readModel(name: String): Model {
-	System.err.print("Reading $name...")
+private fun readModel(name: String, output: PrintStream? = System.err): Model {
+	output?.print("Reading $name...")
 	val jsonString = Kaifu2x::class.java.getResourceAsStream("/models/$name").readBytes().toString(ASCII)
 	//val jsonString = ClassLoader.getSystemClassLoader().getResourceAsStream("models/$name").readBytes().toString(ASCII)
 	val json = Json.decode(jsonString)
 	return Model.parseJson(json).apply {
-		System.err.println("Ok")
+		output?.println("Ok")
 	}
 }
 
-private fun getScale2xModel(): Model = readModel("scale2.0x_model.json")
-private fun getNoiseModel(level: Int): Model? = if (level in 1..3) readModel("noise${level}_model.json") else null
+private fun getScale2xModel(output: PrintStream? = System.err): Model = readModel("scale2.0x_model.json", output)
+private fun getNoiseModel(level: Int, output: PrintStream? = System.err): Model? = if (level in 1..3) readModel("noise${level}_model.json", output) else null
