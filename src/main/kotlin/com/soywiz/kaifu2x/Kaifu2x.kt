@@ -1,6 +1,7 @@
 package com.soywiz.kaifu2x
 
 import com.soywiz.kaifu2x.util.FloatArray2
+import com.soywiz.kaifu2x.util.copySliceWithSizeOutOfBounds
 import com.soywiz.kaifu2x.util.readComponentf
 import com.soywiz.kaifu2x.util.writeComponentf
 import com.soywiz.klock.TimeSpan
@@ -34,6 +35,7 @@ object Kaifu2xCli {
 		System.err.println("  -v        - Displays version")
 		System.err.println("  -n[0-3]   - Noise reduction [default to 0 (no noise reduction)]")
 		System.err.println("  -s[1-2]   - Scale level 1=1x, 2=2x [default to 1 (no scale)]")
+		System.err.println("  -cs<X>    - Chunk size [default to 128]")
 		System.err.println("  -q[0-100] - The quality of the output (JPG, PNG) [default=100]")
 		System.err.println("  -mt       - Multi Threaded [default]")
 		System.err.println("  -st       - Single Threaded")
@@ -50,9 +52,10 @@ object Kaifu2xCli {
 		var components = listOf(BitmapChannel.Y, BitmapChannel.A)
 		var inputName: String? = null
 		var outputName: String? = null
-		var noiseReduction: Int = 0
-		var scale: Int = 1
-		var quality: Int = 100
+		var noiseReduction = 0
+		var scale = 1
+		var quality = 100
+		var chunkSize = 128
 
 		if (args.isEmpty()) helpAndExit()
 
@@ -64,15 +67,12 @@ object Kaifu2xCli {
 				c == "-v" -> run { println(KAIFU2X_VERSION); exitProcess(-1) }
 				c == "-st" -> parallel = false
 				c == "-mt" -> parallel = true
-				c == "-n0" -> noiseReduction = 0
-				c == "-n1" -> noiseReduction = 1
-				c == "-n2" -> noiseReduction = 2
-				c == "-n3" -> noiseReduction = 3
-				c == "-s1" -> scale = 1
-				c == "-s2" -> scale = 2
 				c == "-cl" -> components = listOf(BitmapChannel.Y)
 				c == "-cla" -> components = listOf(BitmapChannel.Y, BitmapChannel.A)
 				c == "-clca" -> components = BitmapChannel.ALL.toList()
+				c.startsWith("-cs") -> chunkSize = c.substr(3).toIntOrNull() ?: 128
+				c.startsWith("-n") -> noiseReduction = c.substr(2).toIntOrNull() ?: 0
+				c.startsWith("-s") -> scale = c.substr(2).toIntOrNull() ?: 1
 				c.startsWith("-q") -> quality = c.substr(2).toIntOrNull() ?: 100
 				else -> {
 					if (c.startsWith("-")) invalidOp("Unknown switch $c")
@@ -85,6 +85,8 @@ object Kaifu2xCli {
 			}
 		}
 
+		if (noiseReduction !in 0..3) invalidOp("nouseReduction must be between 0..3")
+		if (scale !in 1..2) invalidOp("scale must be between 1..2")
 		val inputFileName = inputName ?: invalidOp("Missing input file name")
 		val outputFileName = outputName ?: invalidOp("Missing output file name")
 
@@ -113,54 +115,45 @@ object Kaifu2xCli {
 
 // Exposed functions
 object Kaifu2x {
-	suspend fun noiseReductionRgba(image: Bitmap32, noise: Int, components: List<BitmapChannel> = listOf(BitmapChannel.Y, BitmapChannel.A), parallel: Boolean = true): Bitmap32 {
-		return getNoiseModel(noise)?.waifu2xCoreRgba("noise$noise", image, components, parallel) ?: image
+	suspend fun noiseReductionRgba(image: Bitmap32, noise: Int, components: List<BitmapChannel> = listOf(BitmapChannel.Y, BitmapChannel.A), parallel: Boolean = true, chunkSize: Int = 128): Bitmap32 {
+		return getNoiseModel(noise)?.waifu2xCoreRgba("noise$noise", image, components, parallel, chunkSize) ?: image
 	}
 
-	suspend fun scaleRgba(image: Bitmap32, scale: Int, components: List<BitmapChannel> = listOf(BitmapChannel.Y, BitmapChannel.A), parallel: Boolean = true): Bitmap32 {
+	suspend fun scaleRgba(image: Bitmap32, scale: Int, components: List<BitmapChannel> = listOf(BitmapChannel.Y, BitmapChannel.A), parallel: Boolean = true, chunkSize: Int = 128): Bitmap32 {
 		return when (scale) {
 			1 -> image
-			2 -> getScale2xModel().waifu2xCoreRgba("scale$scale", image.scaleNearest(scale, scale), components, parallel)
+			2 -> getScale2xModel().waifu2xCoreRgba("scale$scale", image.scaleNearest(scale, scale), components, parallel, chunkSize)
 			else -> invalidArg("Invalid scale $scale")
 		}
 	}
 }
 
-suspend fun Model.waifu2xCoreRgba(name: String, image: Bitmap32, components: List<BitmapChannel>, parallel: Boolean): Bitmap32 {
-	//val chunkSize = 128
-	//val chunkSize = 32
-	//val chunkSize = 400
-	//val artifactThresold = 2
-	//val artifactThresold = 4
-	//val artifactThresold = 8
-	//val artifactThresold = 16
-	//val artifactThresold = 32
-
-	val chunkSize = 2048
-	//val chunkSize = 128
-	val artifactThresold = 0
-	//val artifactThresold = 32
-	//val artifactThresold = 40
-
+suspend fun Model.waifu2xCoreRgba(name: String, image: Bitmap32, components: List<BitmapChannel>, parallel: Boolean, chunkSize: Int): Bitmap32 {
 	val model = this
 	val imYCbCr = image.rgbaToYCbCr()
+	val padding = this.padding
+
 	val time = measureTimeMillis {
 		System.err.print("Computing relevant components...\r")
 		val acomponents = components.filter { imYCbCr.readComponentf(it).run { !areAllEqualTo(this[0, 0]) } }
 
 		System.err.println("Components: Requested:${components.map { it.toStringYCbCr() }} -> Required:${acomponents.map { it.toStringYCbCr() }}")
+		System.err.println("Parallel: $parallel")
+		System.err.println("ChunkSize: $chunkSize")
 
-		for (y in 0 until imYCbCr.height step (chunkSize - artifactThresold * 2)) {
-			for (x in 0 until imYCbCr.width step (chunkSize - artifactThresold * 2)) {
+		for (y in 0 until imYCbCr.height step chunkSize) {
+			for (x in 0 until imYCbCr.width step chunkSize) {
 				val swidth = min(chunkSize, imYCbCr.width - x)
 				val sheight = min(chunkSize, imYCbCr.height - y)
 				println("CHUNK($x, $y, $swidth, $sheight) [${imYCbCr.width}, ${imYCbCr.height}]")
-				val chunk = imYCbCr.copySliceWithSize(x, y, swidth, sheight)
+				val inPaddedChunk = imYCbCr.copySliceWithSizeOutOfBounds(x - padding, y - padding, swidth + padding * 2, sheight + padding * 2)
+
+				//println("inPaddedChunk: $inPaddedChunk")
 
 				System.gc()
 
 				val startTime = System.currentTimeMillis()
-				model.waifu2xYCbCrInplace(chunk, acomponents, parallel = parallel) { current, total ->
+				val outUnpaddedChunk = model.waifu2xYCbCrNoPadding(inPaddedChunk, acomponents, parallel = parallel) { current, total ->
 					val currentTime = System.currentTimeMillis()
 					val ratio = current.toDouble() / total.toDouble()
 					val elapsedMs = (currentTime - startTime)
@@ -177,13 +170,8 @@ suspend fun Model.waifu2xCoreRgba(name: String, image: Bitmap32, components: Lis
 				}
 				System.err.println()
 
-				val dx = if (x == 0) 0 else artifactThresold
-				val dy = if (y == 0) 0 else artifactThresold
-				if ((chunk.width - dx) > 0 && (chunk.height - dy) > 0) {
-					imYCbCr.put(chunk.copySliceWithSize(dx, dy, chunk.width - dx, chunk.height - dy), x + dx, y + dy)
-					//imYCbCr.put(chunk.sliceWithBounds(dx, dy, chunk.width, chunk.height), x + dx, y + dy)
-					//imYCbCr.put(chunk.copySliceWithSize2(artifactThresold, artifactThresold, chunk.width - artifactThresold, chunk.height - artifactThresold), x + artifactThresold, y + artifactThresold)
-				}
+				//println("outUnpaddedChunk: $outUnpaddedChunk -> $x, $y")
+				imYCbCr.put(outUnpaddedChunk, x, y)
 			}
 		}
 	}
@@ -206,13 +194,32 @@ fun getMemoryUsed(): Long {
 //	return result.yCbCrToRgba()
 //}
 
+fun Model.waifu2xYCbCrNoPadding(imYCbCr: Bitmap32, acomponents: List<BitmapChannel>, parallel: Boolean = true, progressReport: (Int, Int) -> Unit = { cur, total -> }): Bitmap32 {
+	val nthreads = if (parallel) Runtime.getRuntime().availableProcessors() else 1
+	val padding = this.padding
+	System.err.println("Processing Threads: $nthreads")
+
+	val out = imYCbCr.copySliceWithBounds(padding, padding, imYCbCr.width - padding, imYCbCr.height - padding)
+
+	for ((index, c) in acomponents.withIndex()) {
+		val data = imYCbCr.readComponentf(c)
+		val result = waifu2xCore(data, nthreads = nthreads, addPadding = false) { current, total ->
+			val rcurrent = index * total + current
+			val rtotal = total * acomponents.size
+			progressReport(rcurrent, rtotal)
+		}
+		out.writeComponentf(c, result)
+	}
+	return out
+}
+
 fun Model.waifu2xYCbCrInplace(imYCbCr: Bitmap32, acomponents: List<BitmapChannel>, parallel: Boolean = true, progressReport: (Int, Int) -> Unit = { cur, total -> }): Bitmap32 {
 	val nthreads = if (parallel) Runtime.getRuntime().availableProcessors() else 1
 	System.err.println("Processing Threads: $nthreads")
 
 	for ((index, c) in acomponents.withIndex()) {
 		val data = imYCbCr.readComponentf(c)
-		val result = waifu2xCore(data, nthreads = nthreads) { current, total ->
+		val result = waifu2xCore(data, nthreads = nthreads, addPadding = true) { current, total ->
 			val rcurrent = index * total + current
 			val rtotal = total * acomponents.size
 			progressReport(rcurrent, rtotal)
@@ -222,8 +229,8 @@ fun Model.waifu2xYCbCrInplace(imYCbCr: Bitmap32, acomponents: List<BitmapChannel
 	return imYCbCr
 }
 
-fun Model.waifu2xCore(map: FloatArray2, nthreads: Int, progressReport: (Int, Int) -> Unit = { cur, total -> }): FloatArray2 {
-	var i_planes = arrayOf(map.paddedEdge(steps.size))
+fun Model.waifu2xCore(map: FloatArray2, nthreads: Int, addPadding: Boolean = true, progressReport: (Int, Int) -> Unit = { cur, total -> }): FloatArray2 {
+	var i_planes = if (addPadding) arrayOf(map.paddedEdge(steps.size)) else arrayOf(map)
 	val total = steps.map { it.nInputPlane * it.nOutputPlane }.sum()
 	var current = 0
 	val tpool = Executors.newFixedThreadPool(nthreads)

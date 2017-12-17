@@ -3,6 +3,8 @@ package com.soywiz.kaifu2x
 import com.soywiz.korio.lang.DynamicAccess
 
 data class Model(val steps: List<Step>) {
+	val padding: Int get() = steps.size
+
 	companion object {
 		fun parseJson(json: Any?): Model {
 			return DynamicAccess {
