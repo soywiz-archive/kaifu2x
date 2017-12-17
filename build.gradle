@@ -3,7 +3,7 @@ import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.PosixFilePermission
 
 buildscript {
-    ext.projectVersion = '0.3.0'
+    ext.projectVersion = '0.3.1-SNAPSHOT'
     ext.projectName = 'kaifu2x'
     ext.projectGroup = 'com.soywiz'
     ext.projectDesc = 'Port of waifu2x to pure kotlin. Anime-style upscaler and noise reductor based on convolutional neural networks using coffee trained models'
@@ -37,6 +37,7 @@ dependencies {
     compile "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlinVersion"
     compile "com.soywiz:korio:$korioVersion"
     compile "com.soywiz:korim:$korimVersion"
+    compile "org.tensorflow:tensorflow:1.4.0"
 }
 
 task fatJarCore(type: Jar) {
