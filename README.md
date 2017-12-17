@@ -48,7 +48,7 @@ Note that first time you call the script it will take sometime, but further exec
 If you want to try it out without installing anything else than kscript or manually downloading any image:
 ```
 brew install holgerbrandl/tap/kscript
-kscript https://raw.githubusercontent.com/soywiz/kaifu2x/8e1e296bfcbb5e06f384e206ef3bb6fcb8ea3dd4/kaifu2x.kscript -s2 https://raw.githubusercontent.com/soywiz/kaifu2x/a9c863d2a181c5906f6e00726f72e93354418086/docs/goku_small_bg.png goku_small_bg.2x.png
+kscript https://raw.githubusercontent.com/soywiz/kaifu2x/d72ee3dbd6f735f72da46d628390a5298e07f558/kaifu2x.kscript -s2 https://raw.githubusercontent.com/soywiz/kaifu2x/d72ee3dbd6f735f72da46d628390a5298e07f558/docs/goku_small_bg.png goku_small_bg.2x.png
 ```
 
 ### How to use as library?
