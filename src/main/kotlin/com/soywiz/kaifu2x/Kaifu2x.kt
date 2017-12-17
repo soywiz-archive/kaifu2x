@@ -2,8 +2,8 @@ package com.soywiz.kaifu2x
 
 import com.soywiz.kaifu2x.util.FloatArray2
 import com.soywiz.kaifu2x.util.copySliceWithSizeOutOfBounds
-import com.soywiz.kaifu2x.util.readComponentf
-import com.soywiz.kaifu2x.util.writeComponentf
+import com.soywiz.kaifu2x.util.readChannelf
+import com.soywiz.kaifu2x.util.writeChannelf
 import com.soywiz.klock.TimeSpan
 import com.soywiz.korim.bitmap.*
 import com.soywiz.korim.format.*
@@ -49,7 +49,7 @@ object Kaifu2xCli {
 	@JvmStatic
 	fun main(args: Array<String>) = Korio {
 		var parallel = true
-		var components = listOf(BitmapChannel.Y, BitmapChannel.A)
+		var channels = listOf(BitmapChannel.Y, BitmapChannel.A)
 		var inputName: String? = null
 		var outputName: String? = null
 		var noiseReduction = 0
@@ -67,9 +67,9 @@ object Kaifu2xCli {
 				c == "-v" -> run { println(KAIFU2X_VERSION); exitProcess(-1) }
 				c == "-st" -> parallel = false
 				c == "-mt" -> parallel = true
-				c == "-cl" -> components = listOf(BitmapChannel.Y)
-				c == "-cla" -> components = listOf(BitmapChannel.Y, BitmapChannel.A)
-				c == "-clca" -> components = BitmapChannel.ALL.toList()
+				c == "-cl" -> channels = listOf(BitmapChannel.Y)
+				c == "-cla" -> channels = listOf(BitmapChannel.Y, BitmapChannel.A)
+				c == "-clca" -> channels = BitmapChannel.ALL.toList()
 				c.startsWith("-cs") -> chunkSize = c.substr(3).toIntOrNull() ?: 128
 				c.startsWith("-n") -> noiseReduction = c.substr(2).toIntOrNull() ?: 0
 				c.startsWith("-s") -> scale = c.substr(2).toIntOrNull() ?: 1
@@ -99,8 +99,8 @@ object Kaifu2xCli {
 		val image = UniversalVfs(inputFileName).readBitmapNoNative().toBMP32()
 		System.err.println("Ok")
 
-		val noiseReductedImage = Kaifu2x.noiseReductionRgba(image, noiseReduction, components, parallel)
-		val scaledImage = Kaifu2x.scaleRgba(noiseReductedImage, scale, components, parallel)
+		val noiseReductedImage = Kaifu2x.noiseReductionRgba(image, noiseReduction, channels, parallel)
+		val scaledImage = Kaifu2x.scaleRgba(noiseReductedImage, scale, channels, parallel)
 
 		val outFile = UniversalVfs(outputFileName).ensureParents()
 		System.err.print("Writting $outputFileName...")
@@ -115,29 +115,29 @@ object Kaifu2xCli {
 
 // Exposed functions
 object Kaifu2x {
-	suspend fun noiseReductionRgba(image: Bitmap32, noise: Int, components: List<BitmapChannel> = listOf(BitmapChannel.Y, BitmapChannel.A), parallel: Boolean = true, chunkSize: Int = 128): Bitmap32 {
-		return getNoiseModel(noise)?.waifu2xCoreRgba("noise$noise", image, components, parallel, chunkSize) ?: image
+	suspend fun noiseReductionRgba(image: Bitmap32, noise: Int, channels: List<BitmapChannel> = listOf(BitmapChannel.Y, BitmapChannel.A), parallel: Boolean = true, chunkSize: Int = 128): Bitmap32 {
+		return getNoiseModel(noise)?.waifu2xCoreRgba("noise$noise", image, channels, parallel, chunkSize) ?: image
 	}
 
-	suspend fun scaleRgba(image: Bitmap32, scale: Int, components: List<BitmapChannel> = listOf(BitmapChannel.Y, BitmapChannel.A), parallel: Boolean = true, chunkSize: Int = 128): Bitmap32 {
+	suspend fun scaleRgba(image: Bitmap32, scale: Int, channels: List<BitmapChannel> = listOf(BitmapChannel.Y, BitmapChannel.A), parallel: Boolean = true, chunkSize: Int = 128): Bitmap32 {
 		return when (scale) {
 			1 -> image
-			2 -> getScale2xModel().waifu2xCoreRgba("scale$scale", image.scaleNearest(scale, scale), components, parallel, chunkSize)
+			2 -> getScale2xModel().waifu2xCoreRgba("scale$scale", image.scaleNearest(scale, scale), channels, parallel, chunkSize)
 			else -> invalidArg("Invalid scale $scale")
 		}
 	}
 }
 
-suspend fun Model.waifu2xCoreRgba(name: String, image: Bitmap32, components: List<BitmapChannel>, parallel: Boolean, chunkSize: Int): Bitmap32 {
+suspend fun Model.waifu2xCoreRgba(name: String, image: Bitmap32, channels: List<BitmapChannel>, parallel: Boolean, chunkSize: Int): Bitmap32 {
 	val model = this
 	val imYCbCr = image.rgbaToYCbCr()
 	val padding = this.padding
 
 	val time = measureTimeMillis {
-		System.err.print("Computing relevant components...\r")
-		val acomponents = components.filter { imYCbCr.readComponentf(it).run { !areAllEqualTo(this[0, 0]) } }
+		System.err.print("Computing relevant channels...\r")
+		val achannels = channels.filter { imYCbCr.readChannelf(it).run { !areAllEqualTo(this[0, 0]) } }
 
-		System.err.println("Components: Requested:${components.map { it.toStringYCbCr() }} -> Required:${acomponents.map { it.toStringYCbCr() }}")
+		System.err.println("Channels: Requested:${channels.map { it.toStringYCbCr() }} -> Required:${achannels.map { it.toStringYCbCr() }}")
 		System.err.println("Parallel: $parallel")
 		System.err.println("ChunkSize: $chunkSize")
 
@@ -153,7 +153,7 @@ suspend fun Model.waifu2xCoreRgba(name: String, image: Bitmap32, components: Lis
 				System.gc()
 
 				val startTime = System.currentTimeMillis()
-				val outUnpaddedChunk = model.waifu2xYCbCrNoPadding(inPaddedChunk, acomponents, parallel = parallel) { current, total ->
+				val outUnpaddedChunk = model.waifu2xYCbCrNoPadding(inPaddedChunk, achannels, parallel = parallel) { current, total ->
 					val currentTime = System.currentTimeMillis()
 					val ratio = current.toDouble() / total.toDouble()
 					val elapsedMs = (currentTime - startTime)
@@ -188,45 +188,23 @@ fun getMemoryUsed(): Long {
 	return Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()
 }
 
-//fun Model.waifu2xRgba(imRgba: Bitmap32, acomponents: List<ColorComponent>, parallel: Boolean = true, progressReport: (Int, Int) -> Unit = { cur, total -> }): Bitmap32 {
-//	val imYCbCr = imRgba.rgbaToYCbCr()
-//	val result = waifu2xYCbCrInplace(imYCbCr, acomponents, parallel, progressReport)
-//	return result.yCbCrToRgba()
-//}
-
-fun Model.waifu2xYCbCrNoPadding(imYCbCr: Bitmap32, acomponents: List<BitmapChannel>, parallel: Boolean = true, progressReport: (Int, Int) -> Unit = { cur, total -> }): Bitmap32 {
+fun Model.waifu2xYCbCrNoPadding(imYCbCr: Bitmap32, achannels: List<BitmapChannel>, parallel: Boolean = true, progressReport: (Int, Int) -> Unit = { cur, total -> }): Bitmap32 {
 	val nthreads = if (parallel) Runtime.getRuntime().availableProcessors() else 1
 	val padding = this.padding
 	System.err.println("Processing Threads: $nthreads")
 
 	val out = imYCbCr.copySliceWithBounds(padding, padding, imYCbCr.width - padding, imYCbCr.height - padding)
 
-	for ((index, c) in acomponents.withIndex()) {
-		val data = imYCbCr.readComponentf(c)
+	for ((index, c) in achannels.withIndex()) {
+		val data = imYCbCr.readChannelf(c)
 		val result = waifu2xCore(data, nthreads = nthreads, addPadding = false) { current, total ->
 			val rcurrent = index * total + current
-			val rtotal = total * acomponents.size
+			val rtotal = total * achannels.size
 			progressReport(rcurrent, rtotal)
 		}
-		out.writeComponentf(c, result)
+		out.writeChannelf(c, result)
 	}
 	return out
-}
-
-fun Model.waifu2xYCbCrInplace(imYCbCr: Bitmap32, acomponents: List<BitmapChannel>, parallel: Boolean = true, progressReport: (Int, Int) -> Unit = { cur, total -> }): Bitmap32 {
-	val nthreads = if (parallel) Runtime.getRuntime().availableProcessors() else 1
-	System.err.println("Processing Threads: $nthreads")
-
-	for ((index, c) in acomponents.withIndex()) {
-		val data = imYCbCr.readComponentf(c)
-		val result = waifu2xCore(data, nthreads = nthreads, addPadding = true) { current, total ->
-			val rcurrent = index * total + current
-			val rtotal = total * acomponents.size
-			progressReport(rcurrent, rtotal)
-		}
-		imYCbCr.writeComponentf(c, result)
-	}
-	return imYCbCr
 }
 
 fun Model.waifu2xCore(map: FloatArray2, nthreads: Int, addPadding: Boolean = true, progressReport: (Int, Int) -> Unit = { cur, total -> }): FloatArray2 {
