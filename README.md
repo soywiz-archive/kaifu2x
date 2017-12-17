@@ -116,7 +116,7 @@ it takes 2 minutes to scale 2x a single component for a 470x750 image
 for an output of 940x1500.
 
 Version 0.3.0, successfully part the image in chunks of 128x128 by default (you can adjust chunk size).
-So the memory requirements are now much lower. 128*128*4*256=16MB, and it is typical that the cli uses around ~50MB
+So the memory requirements are now much lower. `128*128*4*256=16MB`, and it is typical that the cli uses around ~50MB
 for any image size, though times still are slow until hardware acceleration is implemented. Also processor caches
 are most likely to hit, so for bigger images this is better.
 
