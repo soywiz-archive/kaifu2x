@@ -15,7 +15,10 @@ And it includes code to process convulational 3x3 kernels on a float matrix.
 
 You can grab a precompiled jar from [github's the Releases page](https://github.com/soywiz/kaifu2x/releases/)
 
+Or build from source:
 ```
+git clone https://github.com/soywiz/kaifu2x.git
+cd kaifu2x
 ./gradlew fatJar
 cd build/libs
 java -jar kaifu2x-all.jar -n0 -s2 input.png output.png
