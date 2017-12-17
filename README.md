@@ -32,7 +32,7 @@ Install kaifu2x binary in /usr/local/bin:
 Create a file named `kaifu2x` with this contents:
 ```kotlin
 #!/usr/bin/env kscript
-//DEPS com.soywiz:kaifu2x:0.2.1
+//DEPS com.soywiz:kaifu2x:0.3.0
 com.soywiz.kaifu2x.Kaifu2xCli.main(args)
 ```
 
@@ -55,7 +55,7 @@ kscript https://raw.githubusercontent.com/soywiz/kaifu2x/8e1e296bfcbb5e06f384e20
 
 It is published to maven central. In your `build.gradle` (or maven equivalent):
 ```
-compile "com.soywiz:kaifu2x:0.2.1"
+compile "com.soywiz:kaifu2x:0.3.0"
 ```
 
 Exposed API:
@@ -63,15 +63,15 @@ Exposed API:
 package com.soywiz.kaifu2x
 
 object Kaifu2x {
-	suspend fun noiseReductionRgba(image: Bitmap32, noise: Int, components: List<BitmapChannel> = listOf(BitmapChannel.Y, BitmapChannel.A), parallel: Boolean = true): Bitmap32
-	suspend fun scaleRgba(image: Bitmap32, scale: Int, components: List<BitmapChannel> = listOf(BitmapChannel.Y, BitmapChannel.A), parallel: Boolean = true): Bitmap32
+	suspend fun noiseReductionRgba(image: Bitmap32, noise: Int, channels: List<BitmapChannel> = listOf(BitmapChannel.Y, BitmapChannel.A), parallel: Boolean = true, chunkSize: Int = 128, output: PrintStream? = System.err): Bitmap32
+	suspend fun scaleRgba(image: Bitmap32, scale: Int, channels: List<BitmapChannel> = listOf(BitmapChannel.Y, BitmapChannel.A), parallel: Boolean = true, chunkSize: Int = 128, output: PrintStream? = System.err): Bitmap32
 }
 ```
 
 ### Help
 
 ```
-kaifu2x - 0.2.1 - 2017
+kaifu2x - 0.3.0 - 2017
 
 Usage: kaifu2x [switches] <input.png> <output.png>
 
@@ -80,13 +80,14 @@ Available switches:
   -v        - Displays version
   -n[0-3]   - Noise reduction [default to 0 (no noise reduction)]
   -s[1-2]   - Scale level 1=1x, 2=2x [default to 1 (no scale)]
+  -cs<X>    - Chunk size [default to 128]
   -q[0-100] - The quality of the output (JPG, PNG) [default=100]
   -mt       - Multi Threaded [default]
   -st       - Single Threaded
   -cl       - Process Luminance
   -cla      - Process Luminance & Alpha [default]
   -clca     - Process Luminance & Chroma & Alpha
-```
+  ```
 
 ### Some numbers (v0.2.0)
 
