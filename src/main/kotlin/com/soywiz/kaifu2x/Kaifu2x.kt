@@ -137,25 +137,32 @@ suspend fun Model.waifu2xCoreRgba(name: String, image: Bitmap32, channels: List<
 		System.err.print("Computing relevant channels...\r")
 		val achannels = channels.filter { imYCbCr.readChannelf(it).run { !areAllEqualTo(this[0, 0]) } }
 
-		System.err.println("Channels: Requested:${channels.map { it.toStringYCbCr() }} -> Required:${achannels.map { it.toStringYCbCr() }}")
-		System.err.println("Parallel: $parallel")
-		System.err.println("ChunkSize: $chunkSize")
+		System.err.println("Channels: Requested${channels.map { it.toStringYCbCr() }} -> Required${achannels.map { it.toStringYCbCr() }}")
+		val nthreads = if (parallel) Runtime.getRuntime().availableProcessors() else 1
+		System.err.println("Chunk size: $chunkSize, Threads: $nthreads")
 
+		var processedPixels = 0
+		val totalPixels = imYCbCr.area
+
+		val startTime = System.currentTimeMillis()
 		for (y in 0 until imYCbCr.height step chunkSize) {
 			for (x in 0 until imYCbCr.width step chunkSize) {
 				val swidth = min(chunkSize, imYCbCr.width - x)
 				val sheight = min(chunkSize, imYCbCr.height - y)
-				println("CHUNK($x, $y, $swidth, $sheight) [${imYCbCr.width}, ${imYCbCr.height}]")
+				//println("CHUNK($x, $y, $swidth, $sheight) [${imYCbCr.width}, ${imYCbCr.height}]")
 				val inPaddedChunk = imYCbCr.copySliceWithSizeOutOfBounds(x - padding, y - padding, swidth + padding * 2, sheight + padding * 2)
 
 				//println("inPaddedChunk: $inPaddedChunk")
 
 				System.gc()
 
-				val startTime = System.currentTimeMillis()
-				val outUnpaddedChunk = model.waifu2xYCbCrNoPadding(inPaddedChunk, achannels, parallel = parallel) { current, total ->
+				val chunkPixels = (inPaddedChunk.width - padding * 2) * (inPaddedChunk.height - padding * 2)
+				val outUnpaddedChunk = model.waifu2xYCbCrNoPadding(inPaddedChunk, achannels, nthreads = nthreads) { current, total ->
 					val currentTime = System.currentTimeMillis()
-					val ratio = current.toDouble() / total.toDouble()
+					val localRatio = current.toDouble() / total.toDouble()
+					val localProcessedPixels = (chunkPixels * localRatio).toInt()
+					val totalProcessedPixels = processedPixels + localProcessedPixels
+					val ratio = totalProcessedPixels.toDouble() / totalPixels.toDouble()
 					val elapsedMs = (currentTime - startTime)
 					val estimatedMs = elapsedMs * (1.0 / ratio)
 					System.err.print(
@@ -168,7 +175,8 @@ suspend fun Model.waifu2xCoreRgba(name: String, image: Bitmap32, channels: List<
 						)
 					)
 				}
-				System.err.println()
+				processedPixels += chunkPixels
+				//System.err.println()
 
 				//println("outUnpaddedChunk: $outUnpaddedChunk -> $x, $y")
 				imYCbCr.put(outUnpaddedChunk, x, y)
@@ -188,10 +196,8 @@ fun getMemoryUsed(): Long {
 	return Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()
 }
 
-fun Model.waifu2xYCbCrNoPadding(imYCbCr: Bitmap32, achannels: List<BitmapChannel>, parallel: Boolean = true, progressReport: (Int, Int) -> Unit = { cur, total -> }): Bitmap32 {
-	val nthreads = if (parallel) Runtime.getRuntime().availableProcessors() else 1
+fun Model.waifu2xYCbCrNoPadding(imYCbCr: Bitmap32, achannels: List<BitmapChannel>, nthreads: Int, progressReport: (Int, Int) -> Unit = { cur, total -> }): Bitmap32 {
 	val padding = this.padding
-	System.err.println("Processing Threads: $nthreads")
 
 	val out = imYCbCr.copySliceWithBounds(padding, padding, imYCbCr.width - padding, imYCbCr.height - padding)
 

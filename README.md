@@ -1,5 +1,7 @@
 ## Waifu2x implementation in pure Kotlin
 
+[![Build Status](https://travis-ci.org/soywiz/kaifu2x.svg?branch=master)](https://travis-ci.org/soywiz/kaifu2x)
+
 Waifu2x is a upscaler/noise-reductor for anime-style images based on convolutional neural networks.
 Original implementation [was written in LUA](https://github.com/lltcggie/waifu2x-caffe), and there is a [very simple python based implementation](https://marcan.st/transf/waifu2x.py).
 It uses a [caffee-based](http://caffe.berkeleyvision.org/) deep learning models.
@@ -86,22 +88,33 @@ Available switches:
   -clca     - Process Luminance & Chroma & Alpha
 ```
 
-### Some numbers
+### Some numbers (v0.2.0)
 
-**Note:** As a performance example in a `MBP13@2.4ghz`
+~~**Note:** As a performance example in a `MBP13@2.4ghz`
 it takes 4 minutes to process a single component for a 470x750 image
-for an output of 940x1500.
+for an output of 940x1500.~~
 
 And memory used:
-**Used:** 1.6GB, **Max Heap:** 2GB
+~~**Used:** 1.6GB, **Max Heap:** 2GB~~
 
-Think that in the last step it has to keep 256 times (128 for the input, and 128 for the output)
-the size of your uncompressed 2x image in memory.
+~~Think that in the last step it has to keep 256 times (128 for the input, and 128 for the output)
+the size of your uncompressed 2x image in memory.~~
 
-So a 940x1500 float components, requires 5.5MB, and 256 times: 1408 MB + some extra stuff like temp buffers and so.
+~~So a 940x1500 float components, requires 5.5MB, and 256 times: 1408 MB + some extra stuff like temp buffers and so.~~
 
-**NOTE:** Future versions will use less memory: https://github.com/soywiz/kaifu2x/issues/1 but that will require
-fixing an issue on edges (probably padding-related).
+~~**NOTE:** Future versions will use less memory: https://github.com/soywiz/kaifu2x/issues/1 but that will require
+fixing an issue on edges (probably padding-related).~~
+
+### Some numbers (v0.3.0)
+
+**Note:** As a performance example in a `MBP13@2.4ghz`
+it takes 2 minutes to scale 2x a single component for a 470x750 image
+for an output of 940x1500.
+
+Version 0.3.0, successfully partition the image in chunks of 128x128 by default (you can adjust chunk size).
+So the memory requirements are now much lower. 128*128*4*256=16MB, and it is typical that the cli uses around ~50MB
+for any image size, though times still are slow until hardware acceleration is implemented. Also processor caches
+are most likely to hit, so for bigger images this is better.
 
 ### How does this work?
 
