@@ -1,5 +1,11 @@
 package com.soywiz.kaifu2x.tf
 
+import com.soywiz.kaifu2x.getScale2xModel
+import com.soywiz.kaifu2x.util.readChannelf
+import com.soywiz.klock.Klock
+import com.soywiz.korim.bitmap.BitmapChannel
+import com.soywiz.korim.bitmap.sliceWithSize
+import com.soywiz.korim.format.PNG
 import com.soywiz.korio.Korio
 import com.soywiz.korio.vfs.localCurrentDirVfs
 import org.tensorflow.*
@@ -11,13 +17,78 @@ object TensorFlowExample {
     @JvmStatic
     fun main(args: Array<String>) = Korio {
         val imageBytes = localCurrentDirVfs["src/test/resources/goku_small_bg.png"].readBytes()
+        val model = getScale2xModel()
+
+        val image32 = PNG.decode(imageBytes).toBMP32().sliceWithSize(0, 0, 16, 16).extract()
+        //val image32 = PNG.decode(imageBytes).toBMP32().sliceWithSize(0, 0, 32, 32).extract()
+        //val image32 = PNG.decode(imageBytes).toBMP32()
+        val image = image32.readChannelf(BitmapChannel.RED).data
 
         TensorGraph {
-            val kernel = floatArrayOf(
-                    0f, 0.5f, 0f,
-                    0f, 0.5f, 0f,
-                    0f, 0f, 0f
-            ).const.reshape(3, 3, 1, 1)
+            val input = image.const.reshape(1, image32.width, image32.height, 1)
+
+            var inputs = arrayListOf(input)
+            println("Generating graph...")
+            val ZERO = 0f.const
+            val ZERO_POINT_ONE = 1f.const
+
+            var totalConvolutions2 = 0
+            var totalConvolutions = 0
+            for (step in model.steps) {
+                println("" + step.nInputPlane + " -> " + step.nOutputPlane)
+                val outputs = arrayListOf<TensorOutput<Float>>()
+                for (wm in 0 until step.weight.size) {
+                    val weights = step.weight[wm]
+                    val bias = step.bias[wm]
+                    val partials = arrayListOf<TensorOutput<Float>>()
+
+                    // @TODO: We can do this at once!
+                    for (n in 0 until weights.size) {
+                        val input = inputs[n]
+                        val weight = weights[n]
+                        val kernel = weight.const.reshape(3, 3, 1, 1)
+                        val output = input.conv2d(kernel)
+                        partials += output
+                        //return@TensorGraph
+
+                        totalConvolutions++
+                    }
+
+                    totalConvolutions2++
+
+                    val partial = partials.sum() + bias.const
+                    val output = max(partial, ZERO) + (min(partial, ZERO) * ZERO_POINT_ONE)
+                    outputs += output
+                    //val res = output.fetch().getFloats()
+                    //println(output.fetch().getFloats().toList())
+                    //println(weightList.toList().map { it.toList() })
+                }
+                inputs = outputs
+                //println("[1]")
+                //outputs.map { it.fetch().getFloats() }
+                //println("[2]")
+                //break
+            }
+            // @TODO: We should do just 7 convolution batches instead of 31904
+            println("Computing... ($totalConvolutions2, $totalConvolutions)")
+            println(inputs.size)
+
+            val start = Klock.currentTimeMillis()
+            println(inputs[0].fetch().getFloats())
+            val end = Klock.currentTimeMillis()
+            val elapsed = end - start
+            println("Done ($elapsed)")
+        }
+
+        /*
+        TensorGraph {
+            //val kernel = floatArrayOf(
+            //        0f, 0.5f, 0f,
+            //        0f, 0.5f, 0f,
+            //        0f, 0f, 0f
+            //).const.reshape(3, 3, 1, 1)
+
+            val kernel = 1f.const.constFill(3, 3, 1, 1)
 
             //val kernel = floatArrayOf(
             //        0.1f
@@ -25,15 +96,17 @@ object TensorFlowExample {
 
             val image = imageBytes.const.decodePng(channels = 4).castToFloat() / 255f
             //val image2 = image[0..15, 0..15, 0..0].addDimension()
-            val image2 = image.slice(0..15, 0..15, 0..3).addDimension(0).reshape(4, 16, 16, 1)
+            //println(image.dimensions)
+            val image2 = image.slice(0 until 32, 0 until 32, 0 until 4).reshape(4, 32, 32, 1)
             println(image2.out)
             //val image3 = image2.depthwiseConv2d(kernel = kernel, strides = intArrayOf(1, 1, 1, 1), padding = "VALID")
-            val image3 = image2.conv2d(kernel = kernel, strides = intArrayOf(1, 1, 1, 1), padding = "VALID")
+            val image3 = image2.conv2d(kernel = kernel, strides = intArrayOf(1, 1, 1, 1), padding = TensorGraph.Padding.VALID)
 
             val result = image3.fetch()
             println(result.dimensions.toList())
             println(result.getFloats().toList())
         }
+        */
 
         /*
         Graph().use { g ->
@@ -61,6 +134,7 @@ object TensorFlowExample {
 }
 
 class TensorOutput<T>(val g: Graph, val out: Output<T>) {
+    val dimensions by lazy { val shape = out.shape(); (0 until shape.numDimensions()).map { shape.size(it).toInt() } }
     override fun toString(): String = "$out"
 }
 
@@ -91,6 +165,15 @@ class TensorGraph(val g: Graph) {
 
     operator fun <T> TensorOutput<T>.get(vararg ranges: IntRange): TensorOutput<T> = slice(*ranges)
 
+    fun <T> Iterable<TensorOutput<T>>.sum(): TensorOutput<T> {
+        return g.opBuilder("AddN", "AddN${lastId++}")
+                .addInputList(this.map { it.out }.toTypedArray())
+                .build().output<T>(0).tf
+    }
+
+    fun <T> max(l: TensorOutput<T>, r: TensorOutput<T>): TensorOutput<T> = binaryOp("Maximum", l, r)
+    fun <T> min(l: TensorOutput<T>, r: TensorOutput<T>): TensorOutput<T> = binaryOp("Minimum", l, r)
+
     fun <T> TensorOutput<T>.slice(vararg ranges: IntRange): TensorOutput<T> {
         val begin = ranges.map { it.start.toLong() }.toLongArray()
         val size = ranges.map { (it.endInclusive.toLong() - it.start.toLong()) + 1 }.toLongArray()
@@ -101,9 +184,7 @@ class TensorGraph(val g: Graph) {
                 .addInput(this.out)
                 .addInput(begin.const.out)
                 .addInput(size.const.out)
-                .build()
-                .output<T>(0)
-                .tf
+                .build().output<T>(0).tf
 
     }
 
@@ -111,28 +192,26 @@ class TensorGraph(val g: Graph) {
         return g.opBuilder("Reshape", "Reshape${lastId++}")
                 .addInput(this.out)
                 .addInput(dims.const.out)
-                .build()
-                .output<T>(0)
-                .tf
+                .build().output<T>(0).tf
     }
 
-    fun <T> TensorOutput<T>.depthwiseConv2d(kernel: TensorOutput<T>, strides: IntArray, padding: String = "VALID"): TensorOutput<T> {
+    fun <T> TensorOutput<T>.depthwiseConv2d(kernel: TensorOutput<T>, strides: IntArray = intArrayOf(1, 1, 1, 1), padding: Padding = Padding.VALID): TensorOutput<T> {
         return g.opBuilder("DepthwiseConv2dNative", "DepthwiseConv2dNative${lastId++}")
                 .addInput(this.out)
                 .addInput(kernel.out)
                 .setAttr("strides", strides.map { it.toLong() }.toLongArray())
-                .setAttr("padding", padding)
-                .build()
-                .output<T>(0)
-                .tf
+                .setAttr("padding", padding.name)
+                .build().output<T>(0).tf
     }
 
-    fun <T> TensorOutput<T>.conv2d(kernel: TensorOutput<T>, strides: IntArray, padding: String = "VALID"): TensorOutput<T> {
+    enum class Padding { VALID, SAME }
+
+    fun <T> TensorOutput<T>.conv2d(kernel: TensorOutput<T>, strides: IntArray = intArrayOf(1, 1, 1, 1), padding: Padding = Padding.VALID): TensorOutput<T> {
         return g.opBuilder("Conv2D", "Conv2D${lastId++}")
                 .addInput(this.out)
                 .addInput(kernel.out)
                 .setAttr("strides", strides.map { it.toLong() }.toLongArray())
-                .setAttr("padding", padding)
+                .setAttr("padding", padding.name)
                 .build()
                 .output<T>(0)
                 .tf
@@ -204,6 +283,13 @@ class TensorGraph(val g: Graph) {
     val FloatArray.const: TensorOutput<Float> get() = constant(genName(), this)
     val LongArray.const: TensorOutput<Long> get() = constant(genName(), this)
     val ByteArray.const: TensorOutput<String> get() = constant(genName(), this)
+
+    fun <T> TensorOutput<T>.constFill(vararg dimensions: Int): TensorOutput<T> = g.opBuilder("Fill", genName())
+            .addInput(dimensions.const.out)
+            .addInput(this.out)
+            .build()
+            .output<T>(0).tf
+
 
     operator fun <T> TensorOutput<T>.div(that: TensorOutput<T>): TensorOutput<T> = binaryOp("Div", this, that)
     operator fun <T> TensorOutput<T>.times(that: TensorOutput<T>): TensorOutput<T> = binaryOp("Mul", this, that)

@@ -15,8 +15,8 @@ buildscript {
     ext.projectInceptionYear = 2017
 
     ext.kotlinVersion = '1.2.10'
-    ext.korioVersion = '0.18.6'
-    ext.korimVersion = '0.18.2'
+    ext.korioVersion = '0.18.7'
+    ext.korimVersion = '0.18.3'
 
     repositories {
         mavenLocal()

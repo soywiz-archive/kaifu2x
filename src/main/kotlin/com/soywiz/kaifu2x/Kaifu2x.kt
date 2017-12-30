@@ -290,7 +290,7 @@ fun Model.waifu2xCore(map: FloatArray2, nthreads: Int, addPadding: Boolean = tru
 }
 
 
-private fun readModel(name: String, output: PrintStream? = System.err): Model {
+internal fun readModel(name: String, output: PrintStream? = System.err): Model {
 	output?.print("Reading $name...")
 	val jsonString = Kaifu2x::class.java.getResourceAsStream("/models/$name").readBytes().toString(ASCII)
 	//val jsonString = ClassLoader.getSystemClassLoader().getResourceAsStream("models/$name").readBytes().toString(ASCII)
@@ -300,5 +300,5 @@ private fun readModel(name: String, output: PrintStream? = System.err): Model {
 	}
 }
 
-private fun getScale2xModel(output: PrintStream? = System.err): Model = readModel("scale2.0x_model.json", output)
-private fun getNoiseModel(level: Int, output: PrintStream? = System.err): Model? = if (level in 1..3) readModel("noise${level}_model.json", output) else null
+internal fun getScale2xModel(output: PrintStream? = System.err): Model = readModel("scale2.0x_model.json", output)
+internal fun getNoiseModel(level: Int, output: PrintStream? = System.err): Model? = if (level in 1..3) readModel("noise${level}_model.json", output) else null
