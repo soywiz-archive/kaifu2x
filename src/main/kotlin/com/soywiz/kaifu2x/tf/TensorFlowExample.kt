@@ -35,7 +35,7 @@ object TensorFlowExample2 {
                     4f, 5f, 6f, 7f,
                     8f, 9f, 10f, 11f,
                     12f, 13f, 14f, 14f
-            ).const.reshape(1, 4, 4, 1)
+            ).const.reshape(1, 4, 4, 1).padZero(0 to 0, 7 to 7, 7 to 7, 0 to 0)
             //.reshape(2, 2).padZero(1, 1, 1, 1).reshape(1, 6, 6, 1)
 
             val im2 = floatArrayOf(
@@ -45,6 +45,7 @@ object TensorFlowExample2 {
                     12f, 13f, 14f, 14f
             ).const.reshape(4, 4).padZero(1 to 1, 1 to 1)
 
+            println(im2.fetch())
             println(im2.fetch().getFloats().toList())
 
 
@@ -71,10 +72,15 @@ object TensorFlowExample2 {
                     )
             ).const.reshape(3, 3, 1, 4)
 
-            val res = image.conv2d(kernels)
+            //val res = image.conv2d(kernels).reshape(4, 16, 16, 1)
+            val res = image.conv2d(kernels).transpose(3, 1, 2, 0)
+            println(res)
+            val res2 = res.conv2d(kernels)
 
-            println(res.fetch().tensor)
-            println(res.fetch().getFloats().toList())
+            //println(res.fetch().tensor)
+            //println(res.fetch().getFloats().toList()
+            println(res2)
+            println(res2.fetch().getFloats().toList())
         }
     }
 }
@@ -278,8 +284,11 @@ class TensorGraph(val g: Graph) {
         return build("Slice", this, begin.const, size.const)
     }
 
+    fun <T> TensorOutput<T>.transpose(vararg dimensions: Int): TensorOutput<T> = build("Transpose", this, dimensions.const)
+
     //fun <T> TensorOutput<T>.padZero(vararg paddings: Int): TensorOutput<T> = build("Pad", this, paddings.const)
     fun <T> TensorOutput<T>.padZero(paddings: TensorOutput<Int>): TensorOutput<T> = build("Pad", this, paddings)
+
     fun <T> TensorOutput<T>.padZero(vararg paddings: Pair<Int, Int>): TensorOutput<T> = build("Pad", this, paddings.flatMap { listOf(it.first, it.second) }.toIntArray().const.reshape(paddings.size, 2))
     fun <T> TensorOutput<T>.padConstant(paddings: TensorOutput<Int>, constant: TensorOutput<T> = 0.const.castTo(this.out.dataType())): TensorOutput<T> = build("PadV2", this, paddings, constant)
     fun <T> TensorOutput<T>.padMirror(paddings: TensorOutput<Int>): TensorOutput<T> = build("MirrorPad", this, paddings)
