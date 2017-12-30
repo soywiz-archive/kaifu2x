@@ -202,12 +202,16 @@ fun Model.waifu2xYCbCrNoPadding(imYCbCr: Bitmap32, achannels: List<BitmapChannel
 
 	for ((index, c) in achannels.withIndex()) {
 		val data = imYCbCr.readChannelf(c)
-		val result = waifu2xCore(data, nthreads = nthreads, addPadding = false) { current, total ->
-			val rcurrent = index * total + current
-			val rtotal = total * achannels.size
-			progressReport(rcurrent, rtotal)
+		val ref = data.data[0]
+		val isSolid = data.data.all { it == ref }
+		if (!isSolid) {
+			val result = waifu2xCore(data, nthreads = nthreads, addPadding = false) { current, total ->
+				val rcurrent = index * total + current
+				val rtotal = total * achannels.size
+				progressReport(rcurrent, rtotal)
+			}
+			out.writeChannelf(c, result)
 		}
-		out.writeChannelf(c, result)
 	}
 	return out
 }
