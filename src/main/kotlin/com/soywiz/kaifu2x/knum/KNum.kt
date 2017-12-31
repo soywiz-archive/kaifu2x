@@ -3,6 +3,8 @@ package com.soywiz.kaifu2x.knum
 import com.soywiz.korio.error.invalidOp
 import java.nio.Buffer
 import java.nio.FloatBuffer
+import kotlin.math.max
+import kotlin.math.min
 
 object KNumExample {
     @JvmStatic
@@ -11,7 +13,7 @@ object KNumExample {
             //println(floatArrayOf(1f, 2f, 3f, 4f).const)
             //println(floatArrayOf(1f, 2f, 3f, 4f).const.reshape(2, 2))
             val tensor = floatArrayOf(1f, 2f, 3f, 4f).const + floatArrayOf(4f, 5f, 6f, 7f).const
-            val result = (tensor * -(1f.const)).compute().getFloatArray()
+            val result = (tensor * -(1f.const)).clamp((-8f).const, (-6f).const).compute().getFloatArray()
             println(result.toList())
         }
     }
@@ -36,7 +38,7 @@ open class KNumContext {
 
     open fun <T> computeOperation(tensor: KNum.Operation<T>): KNum.Result<T> = tensor.run {
         when (op) {
-            "add", "sub", "mul", "div" -> computeBinaryOp<T>(op, compute(inputs[0] as KNum.Tensor<T>), compute(inputs[1] as KNum.Tensor<T>))
+            "add", "sub", "mul", "div", "min", "max" -> computeBinaryOp<T>(op, compute(inputs[0] as KNum.Tensor<T>), compute(inputs[1] as KNum.Tensor<T>))
             "neg" -> computeUnaryOp<T>(op, compute(inputs[0] as KNum.Tensor<T>))
             else -> invalidOp("Unsuported operation $op")
         }
@@ -46,7 +48,7 @@ open class KNumContext {
         val of = FloatBuffer.allocate(l.numElements)
         val lf = l.getData() as FloatBuffer
         val num = l.numElements
-        when (op){
+        when (op) {
             "neg" -> for (n in 0 until num) of.put(n, -lf[n])
             else -> invalidOp("Unsupported operation $op")
         }
@@ -71,6 +73,8 @@ open class KNumContext {
             "sub" -> { ll, rr -> ll - rr }
             "mul" -> { ll, rr -> ll * rr }
             "div" -> { ll, rr -> ll / rr }
+            "max" -> { ll, rr -> max(ll, rr) }
+            "min" -> { ll, rr -> min(ll, rr) }
             else -> invalidOp("Unsuported operation $op")
         }
 
@@ -119,6 +123,10 @@ class KNum(val ctx: KNumContext) {
 
     val FloatArray.const: Constant<Float> get() = Constant(intArrayOf(this.size), Type.FLOAT, FloatBuffer.wrap(this))
     val Float.const: Constant<Float> get() = Constant(intArrayOf(1), Type.FLOAT, FloatBuffer.wrap(floatArrayOf(this)))
+
+    fun <T> max(l: Tensor<T>, r: Tensor<T>): Tensor<T> = Operation<T>("max", l.type, l.dims, arrayOf(l, r))
+    fun <T> min(l: Tensor<T>, r: Tensor<T>): Tensor<T> = Operation<T>("min", l.type, l.dims, arrayOf(l, r))
+    fun <T> Tensor<T>.clamp(min: Tensor<T>, max: Tensor<T>): Tensor<T> = min(max(this, min), max)
 
     operator fun <T> Tensor<T>.times(that: Tensor<T>): Tensor<T> = Operation<T>("mul", this.type, this.dims, arrayOf(this, that))
     operator fun <T> Tensor<T>.div(that: Tensor<T>): Tensor<T> = Operation<T>("div", this.type, this.dims, arrayOf(this, that))
