@@ -38,6 +38,7 @@ dependencies {
     compile "com.soywiz:korio:$korioVersion"
     compile "com.soywiz:korim:$korimVersion"
     compile "org.tensorflow:tensorflow:1.4.0"
+    compile "org.jocl:jocl:2.0.0"
 }
 
 task fatJarCore(type: Jar) {

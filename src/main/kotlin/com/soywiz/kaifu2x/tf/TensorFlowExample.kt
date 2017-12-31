@@ -1,5 +1,6 @@
 package com.soywiz.kaifu2x.tf
 
+import com.soywiz.kaifu2x.Model
 import com.soywiz.kaifu2x.getScale2xModel
 import com.soywiz.kaifu2x.util.readChannelf
 import com.soywiz.klock.Klock
@@ -49,28 +50,47 @@ object TensorFlowExample2 {
             println(im2.fetch().getFloats().toList())
 
 
-            val kernels = packKernels(
-                    floatArrayOf(
-                            0f, 0f, 0f,
-                            0f, 1f, 0f,
-                            0f, 0f, 0f
-                    ),
-                    floatArrayOf(
-                            0f, 1f, 0f,
-                            0f, 0f, 0f,
-                            0f, 0f, 0f
-                    ),
-                    floatArrayOf(
-                            0f, 0f, 0f,
-                            0f, 0f, 0f,
-                            0f, 1f, 0f
-                    ),
-                    floatArrayOf(
-                            0f, 0f, 0f,
-                            1f, 0f, 0f,
-                            0f, 0f, 0f
-                    )
-            ).const.reshape(3, 3, 1, 4)
+            //val kernels = packKernels(
+            //        floatArrayOf(
+            //                0f, 0f, 0f,
+            //                0f, 1f, 0f,
+            //                0f, 0f, 0f
+            //        ),
+            //        floatArrayOf(
+            //                0f, 1f, 0f,
+            //                0f, 0f, 0f,
+            //                0f, 0f, 0f
+            //        ),
+            //        floatArrayOf(
+            //                0f, 0f, 0f,
+            //                0f, 0f, 0f,
+            //                0f, 1f, 0f
+            //        ),
+            //        floatArrayOf(
+            //                0f, 0f, 0f,
+            //                1f, 0f, 0f,
+            //                0f, 0f, 0f
+            //        )
+            //).const.reshape(3, 3, 1, 4)
+
+            val kernels = floatArrayOf(
+                    0f, 0f, 0f,
+                    0f, 1f, 0f,
+                    0f, 0f, 0f,
+
+                    0f, 1f, 0f,
+                    0f, 0f, 0f,
+                    0f, 0f, 0f,
+
+                    0f, 0f, 0f,
+                    0f, 0f, 0f,
+                    0f, 1f, 0f,
+
+                    0f, 0f, 0f,
+                    1f, 0f, 0f,
+                    0f, 0f, 0f
+                    //).const.reshape(3, 3, 1, 4)
+            ).const.reshape(4, 3, 3, 1).transpose(1, 2, 3, 0)
 
             //val res = image.conv2d(kernels).reshape(4, 16, 16, 1)
             val res = image.conv2d(kernels).transpose(3, 1, 2, 0)
@@ -90,7 +110,14 @@ object TensorFlowExample {
     @JvmStatic
     fun main(args: Array<String>) = Korio {
         val imageBytes = localCurrentDirVfs["src/test/resources/goku_small_bg.png"].readBytes()
-        val model = getScale2xModel()
+
+        //localCurrentDirVfs["src/test/resources/goku_small_bg.jpg"].writeBytes(TensorGraph {
+        //    imageBytes.const.decodePng(3).encodeJpeg(30).fetch().getBytes()
+        //})
+//
+        //return@Korio
+
+        val model: Model = getScale2xModel()
 
         val image32 = PNG.decode(imageBytes).toBMP32().sliceWithSize(0, 0, 16, 16).extract()
         //val image32 = PNG.decode(imageBytes).toBMP32().sliceWithSize(0, 0, 32, 32).extract()
@@ -216,6 +243,13 @@ class TensorResult<T>(val tensor: Tensor<T>) {
     override fun toString(): String = "$tensor"
 }
 
+fun TensorResult<String>.getBytes(): ByteArray {
+    return tensor.bytesValue()
+    //val fa = ByteArray(tensor.numBytes())
+    //tensor.writeTo(ByteBuffer.wrap(fa))
+    //return fa
+}
+
 fun TensorResult<Float>.getFloats(): FloatArray {
     val fa = FloatArray(tensor.numElements())
     tensor.writeTo(FloatBuffer.wrap(fa))
@@ -271,12 +305,13 @@ class TensorGraph(val g: Graph) {
                 }
             }
         }
+        b.setDevice("/gpu:0")
         return b.build().output<T>(0).tf
     }
 
     fun <T> Iterable<TensorOutput<T>>.sum(): TensorOutput<T> = build("AddN", this)
-    fun <T> max(l: TensorOutput<T>, r: TensorOutput<T>): TensorOutput<T> = binaryOp("Maximum", l, r)
-    fun <T> min(l: TensorOutput<T>, r: TensorOutput<T>): TensorOutput<T> = binaryOp("Minimum", l, r)
+    fun <T> max(l: TensorOutput<T>, r: TensorOutput<T>): TensorOutput<T> = build("Maximum", l, r)
+    fun <T> min(l: TensorOutput<T>, r: TensorOutput<T>): TensorOutput<T> = build("Minimum", l, r)
 
     fun <T> TensorOutput<T>.slice(vararg ranges: IntRange): TensorOutput<T> {
         val begin = ranges.map { it.start.toLong() }.toLongArray()
@@ -284,6 +319,7 @@ class TensorGraph(val g: Graph) {
         return build("Slice", this, begin.const, size.const)
     }
 
+    fun <T> TensorOutput<T>.reshape(vararg dims: Int): TensorOutput<T> = build("Reshape", this, dims.const)
     fun <T> TensorOutput<T>.transpose(vararg dimensions: Int): TensorOutput<T> = build("Transpose", this, dimensions.const)
 
     //fun <T> TensorOutput<T>.padZero(vararg paddings: Int): TensorOutput<T> = build("Pad", this, paddings.const)
@@ -292,7 +328,6 @@ class TensorGraph(val g: Graph) {
     fun <T> TensorOutput<T>.padZero(vararg paddings: Pair<Int, Int>): TensorOutput<T> = build("Pad", this, paddings.flatMap { listOf(it.first, it.second) }.toIntArray().const.reshape(paddings.size, 2))
     fun <T> TensorOutput<T>.padConstant(paddings: TensorOutput<Int>, constant: TensorOutput<T> = 0.const.castTo(this.out.dataType())): TensorOutput<T> = build("PadV2", this, paddings, constant)
     fun <T> TensorOutput<T>.padMirror(paddings: TensorOutput<Int>): TensorOutput<T> = build("MirrorPad", this, paddings)
-    fun <T> TensorOutput<T>.reshape(vararg dims: Int): TensorOutput<T> = build("Reshape", this, dims.const)
 
     fun <T> TensorOutput<T>.depthwiseConv2d(kernel: TensorOutput<T>, strides: IntArray = intArrayOf(1, 1, 1, 1), padding: Padding = Padding.VALID): TensorOutput<T> {
         return build("DepthwiseConv2dNative", this, kernel, attrs = mapOf("strides" to strides, "padding" to padding))
@@ -306,45 +341,36 @@ class TensorGraph(val g: Graph) {
 
     private val <T> Output<T>.tf get() = TensorOutput(g, this)
 
-    private fun <T> binaryOp(type: String, in1: TensorOutput<T>, in2: TensorOutput<T>): TensorOutput<T> = build(type, in1, in2)
-    private fun <T, U, V> binaryOp3(type: String, in1: TensorOutput<U>, in2: TensorOutput<V>): TensorOutput<T> = build<T>(type, in1, in2)
-    fun <T> constant(name: String, value: Any, type: Class<T>): TensorOutput<T> {
-        return Tensor.create(value, type).use { t ->
-            build("Const", attrs = mapOf("dtype" to DataType.fromClass(type), "value" to t), name = name)
-        }
-    }
+    //private fun <T> binaryOp(type: String, in1: TensorOutput<T>, in2: TensorOutput<T>): TensorOutput<T> = build(type, in1, in2)
+    //private fun <T, U, V> binaryOp3(type: String, in1: TensorOutput<U>, in2: TensorOutput<V>): TensorOutput<T> = build<T>(type, in1, in2)
+    fun <T> constant(name: String, value: Any, type: Class<T>): TensorOutput<T> =
+            Tensor.create(value, type).use { build("Const", attrs = mapOf("dtype" to DataType.fromClass(type), "value" to it), name = name) }
 
-    private fun decodeImage(op: String, contents: TensorOutput<String>, channels: Long): TensorOutput<UInt8> {
-        return build(op, contents, attrs = mapOf("channels" to channels))
-    }
+    fun <T, U> TensorOutput<T>.castTo(dtype: DataType): TensorOutput<U> = build("Cast", this, attrs = mapOf("DstT" to dtype))
+    fun <T, U> TensorOutput<T>.castTo(type: Class<U>): TensorOutput<U> = this.castTo(DataType.fromClass(type))
 
-    fun <T, U> cast(value: TensorOutput<T>, dtype: DataType): TensorOutput<U> = build("Cast", value, attrs = mapOf("DstT" to dtype))
-    fun <T, U> cast(value: TensorOutput<T>, type: Class<U>): TensorOutput<U> = cast(value, DataType.fromClass(type))
+    fun <T> TensorOutput<T>.castToFloat(): TensorOutput<Float> = this.castTo(java.lang.Float::class.java) as TensorOutput<Float>
+    fun <T> TensorOutput<T>.castToInt(): TensorOutput<Int> = this.castTo(java.lang.Integer::class.java) as TensorOutput<Int>
+    fun <T> TensorOutput<T>.castToUInt8(): TensorOutput<UInt8> = this.castTo(UInt8::class.java)
 
-    fun <T> TensorOutput<T>.castToFloat() = cast(this, java.lang.Float::class.java) as TensorOutput<Float>
-    fun <T, U> TensorOutput<T>.castTo(dataType: DataType): TensorOutput<U> = cast(this, dataType)
-    fun <T> resizeBilinear(images: TensorOutput<T>, size: TensorOutput<Int>): TensorOutput<Float> = binaryOp3("ResizeBilinear", images, size)
-    fun <T> expandDims(input: TensorOutput<T>, dim: TensorOutput<Int>): TensorOutput<T> = binaryOp3("ExpandDims", input, dim)
+    fun <T> resizeBilinear(images: TensorOutput<T>, size: TensorOutput<Int>): TensorOutput<Float> = build("ResizeBilinear", images, size)
+    fun <T> expandDims(input: TensorOutput<T>, dim: TensorOutput<Int>): TensorOutput<T> = build("ExpandDims", input, dim)
 
     fun <T> TensorOutput<T>.addDimension(pos: Int = -1): TensorOutput<T> = expandDims(this, pos.const)
 
 
-    fun TensorOutput<String>.decodeJpeg(channels: Number): TensorOutput<UInt8> = decodeImage("DecodeJpeg", this, channels.toLong())
-    fun TensorOutput<String>.decodePng(channels: Number = 4): TensorOutput<UInt8> = decodeImage("DecodePng", this, channels.toLong())
+    fun TensorOutput<String>.decodeJpeg(channels: Number): TensorOutput<UInt8> = build("DecodeJpeg", this, attrs = mapOf("channels" to channels.toLong()))
+    fun TensorOutput<String>.decodePng(channels: Number = 4): TensorOutput<UInt8> = build("DecodePng", this, attrs = mapOf("channels" to channels.toLong()))
 
-    fun constant(name: String, value: ByteArray): TensorOutput<String> = this.constant(name, value, String::class.java)
-    fun constant(name: String, value: Int): TensorOutput<Int> = this.constant(name, value, java.lang.Integer::class.java) as TensorOutput<Int>
-    fun constant(name: String, value: IntArray): TensorOutput<Int> = this.constant(name, value, java.lang.Integer::class.java) as TensorOutput<Int>
-    fun constant(name: String, value: FloatArray): TensorOutput<Float> = this.constant(name, value, java.lang.Float::class.java) as TensorOutput<Float>
-    fun constant(name: String, value: LongArray): TensorOutput<Long> = this.constant(name, value, java.lang.Long::class.java) as TensorOutput<Long>
-    fun constant(name: String, value: Float): TensorOutput<Float> = this.constant(name, value, java.lang.Float::class.java) as TensorOutput<Float>
+    fun TensorOutput<UInt8>.encodeJpeg(quality: Int = 95): TensorOutput<String> = build("EncodeJpeg", this, attrs = mapOf("quality" to quality.toLong()))
+    fun TensorOutput<UInt8>.encodePng(compression: Int = -1): TensorOutput<String> = build("EncodePng", this, attrs = mapOf("compression" to compression.toLong()))
 
-    val Float.const: TensorOutput<Float> get() = constant(genName(), this)
-    val Int.const: TensorOutput<Int> get() = constant(genName(), this)
-    val IntArray.const: TensorOutput<Int> get() = constant(genName(), this)
-    val FloatArray.const: TensorOutput<Float> get() = constant(genName(), this)
-    val LongArray.const: TensorOutput<Long> get() = constant(genName(), this)
-    val ByteArray.const: TensorOutput<String> get() = constant(genName(), this)
+    val Float.const: TensorOutput<Float> get() = constant(genName(), this, java.lang.Float::class.java) as TensorOutput<Float>
+    val Int.const: TensorOutput<Int> get() = constant(genName(), this, java.lang.Integer::class.java) as TensorOutput<Int>
+    val IntArray.const: TensorOutput<Int> get() = constant(genName(), this, java.lang.Integer::class.java) as TensorOutput<Int>
+    val FloatArray.const: TensorOutput<Float> get() = constant(genName(), this, java.lang.Float::class.java) as TensorOutput<Float>
+    val LongArray.const: TensorOutput<Long> get() = constant(genName(), this, java.lang.Long::class.java) as TensorOutput<Long>
+    val ByteArray.const: TensorOutput<String> get() = constant(genName(), this, String::class.java)
     val Any.const: TensorOutput<*>
         get() = when (this) {
             is Int -> this.const
@@ -356,20 +382,16 @@ class TensorGraph(val g: Graph) {
             else -> TODO("Unsupported $this")
         }
 
-    fun <T> TensorOutput<T>.constFill(vararg dimensions: Int): TensorOutput<T> = g.opBuilder("Fill", genName())
-            .addInput(dimensions.const.out)
-            .addInput(this.out)
-            .build()
-            .output<T>(0).tf
+    fun <T> TensorOutput<T>.constFill(vararg dimensions: Int): TensorOutput<T> = build("Fill", dimensions.const, this)
 
 
-    operator fun <T> TensorOutput<T>.div(that: TensorOutput<T>): TensorOutput<T> = binaryOp("Div", this, that)
-    operator fun <T> TensorOutput<T>.times(that: TensorOutput<T>): TensorOutput<T> = binaryOp("Mul", this, that)
-    operator fun <T> TensorOutput<T>.minus(that: TensorOutput<T>): TensorOutput<T> = binaryOp("Sub", this, that)
-    operator fun <T> TensorOutput<T>.plus(that: TensorOutput<T>): TensorOutput<T> = binaryOp("Add", this, that)
+    operator fun <T> TensorOutput<T>.div(that: TensorOutput<T>): TensorOutput<T> = build("Div", this, that)
+    operator fun <T> TensorOutput<T>.times(that: TensorOutput<T>): TensorOutput<T> = build("Mul", this, that)
+    operator fun <T> TensorOutput<T>.minus(that: TensorOutput<T>): TensorOutput<T> = build("Sub", this, that)
+    operator fun <T> TensorOutput<T>.plus(that: TensorOutput<T>): TensorOutput<T> = build("Add", this, that)
 
-    operator fun TensorOutput<Float>.div(cst: Float) = binaryOp("Div", this, cst.const)
-    operator fun TensorOutput<Float>.plus(cst: Float) = binaryOp("Add", this, cst.const)
-    operator fun TensorOutput<Float>.minus(cst: Float) = binaryOp("Sub", this, cst.const)
-    operator fun TensorOutput<Float>.times(cst: Float) = binaryOp("Mul", this, cst.const)
+    operator fun TensorOutput<Float>.div(cst: Float): TensorOutput<Float> = build("Div", this, cst.const)
+    operator fun TensorOutput<Float>.plus(cst: Float): TensorOutput<Float> = build("Add", this, cst.const)
+    operator fun TensorOutput<Float>.minus(cst: Float): TensorOutput<Float> = build("Sub", this, cst.const)
+    operator fun TensorOutput<Float>.times(cst: Float): TensorOutput<Float> = build("Mul", this, cst.const)
 }
