@@ -27,7 +27,7 @@ class ClContext(val type: DeviceType = DeviceType.PREFER_GPU) : Closeable {
             DeviceType.PREFER_GPU -> platform.getDevices(CL_DEVICE_TYPE_GPU).firstOrNull() ?: platform.getDevices(CL_DEVICE_TYPE_ACCELERATOR).firstOrNull() ?: platform.getDevices(CL_DEVICE_TYPE_ALL).first()
             DeviceType.FORCE_GPU -> platform.getDevices(CL_DEVICE_TYPE_GPU).firstOrNull() ?: invalidOp("Can't find GPU devices")
         }
-        println("OpenCL Device: " + device)
+        println("OpenCL Device: " + device.name)
 
         // Create a context for the selected device
         context = clCreateContext(

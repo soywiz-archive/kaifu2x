@@ -2,7 +2,10 @@ package com.soywiz.kaifu2x
 
 import com.soywiz.kaifu2x.util.*
 import com.soywiz.klock.TimeSpan
-import com.soywiz.korim.bitmap.*
+import com.soywiz.korim.bitmap.A
+import com.soywiz.korim.bitmap.Bitmap32
+import com.soywiz.korim.bitmap.BitmapChannel
+import com.soywiz.korim.bitmap.Y
 import com.soywiz.korim.color.RGBA
 import com.soywiz.korim.format.*
 import com.soywiz.korio.Korio
@@ -20,11 +23,8 @@ import com.soywiz.korio.vfs.localCurrentDirVfs
 import java.io.Closeable
 import java.io.PrintStream
 import java.util.*
-import java.util.concurrent.Executors
-import kotlin.math.max
 import kotlin.math.min
 import kotlin.system.exitProcess
-import kotlin.system.measureTimeMillis
 
 fun main(args: Array<String>) = Kaifu2xCli.main(args)
 
@@ -215,31 +215,39 @@ class Kaifu2xOpencl(private val model: Model) : Closeable {
         return out
     }
 
-    fun waifu2xChunked(bmp: Bitmap32, vararg channels: BitmapChannel = arrayOf(BitmapChannel.RED, BitmapChannel.GREEN, BitmapChannel.BLUE, BitmapChannel.ALPHA), chunkSize: Int = 128, progress: (current: Int, total: Int) -> Unit = { current, total -> }): Bitmap32 {
-        val bmpPad = bmp.pad(7)
-        val bmpOut = Bitmap32(bmpPad.width - 14, bmpPad.height - 14)
-
+    fun waifu2xChunkedYCbCr(bmpYCbCr: Bitmap32, vararg channels: BitmapChannel = arrayOf(BitmapChannel.RED, BitmapChannel.GREEN, BitmapChannel.BLUE, BitmapChannel.ALPHA), chunkSize: Int = 128, progress: (current: Int, total: Int) -> Unit = { current, total -> }): Bitmap32 {
         val pad = steps.size * 2
+        val bmpPad = bmpYCbCr.pad(pad / 2)
+        val bmpOut = Bitmap32(bmpPad.width - pad, bmpPad.height - pad)
+        val chunkSizePad = chunkSize - pad
+
         var currentPixels = 0
         val totalPixels = bmpOut.area
 
-        for (cy in 0 until (bmpPad.height.toDouble() / (128 - 14).toDouble()).toIntCeil()) {
-            for (cx in 0 until (bmpPad.width.toDouble() / (128 - 14).toDouble()).toIntCeil()) {
-                val px = cx * (128 - 14)
-                val py = cy * (128 - 14)
-                val width = min(128, bmpPad.width - px)
-                val height = min(128, bmpPad.height - py)
-                val chunk = bmpPad.copySliceWithSize(px, py, width, height)
-                val out = waifu2x(chunk)
+        for (cy in 0 until (bmpPad.height.toDouble() / chunkSizePad.toDouble()).toIntCeil()) {
+            for (cx in 0 until (bmpPad.width.toDouble() / chunkSizePad.toDouble()).toIntCeil()) {
+                val px = cx * chunkSizePad
+                val py = cy * chunkSizePad
+                val width = min(chunkSize, bmpPad.width - px)
+                val height = min(chunkSize, bmpPad.height - py)
+                //println("chunk: ($px, $py)-($width, $height)")
                 progress(currentPixels, totalPixels)
-                //println("$currentPixels/$totalPixels")
-                bmpOut.put(out, cx * (128 - 14), cy * (128 - 14))
-                currentPixels += (width - 14) * (height - 14)
+                if (width >= pad && height >= pad) {
+                    val chunk = bmpPad.copySliceWithSize(px, py, width, height)
+                    val out = waifu2x(chunk, *channels)
+                    //println("$currentPixels/$totalPixels")
+                    bmpOut.put(out, cx * (chunkSize - pad), cy * (chunkSize - pad))
+                }
+                currentPixels += (width - pad) * (height - pad)
             }
         }
         progress(currentPixels, totalPixels)
 
         return bmpOut
+    }
+
+    fun waifu2xChunkedRgba(bmp: Bitmap32, vararg channels: BitmapChannel = arrayOf(BitmapChannel.RED, BitmapChannel.GREEN, BitmapChannel.BLUE, BitmapChannel.ALPHA), chunkSize: Int = 128, progress: (current: Int, total: Int) -> Unit = { current, total -> }): Bitmap32 {
+        return waifu2xChunkedYCbCr(bmp.rgbaToYCbCr(), *channels, chunkSize = chunkSize, progress = progress).yCbCrToRgba()
     }
 
     override fun close() {
@@ -253,7 +261,7 @@ class Kaifu2xOpencl(private val model: Model) : Closeable {
             val bmp = localCurrentDirVfs["src/test/resources/goku_small_bg.png"].readBitmapNoNative().toBMP32()
             val kaifu2x = Kaifu2xOpencl(getScale2xModel())
 
-            val bmpOut = kaifu2x.waifu2xChunked(bmp.rgbaToYCbCr().scaleNearest(2, 2)) { current, total ->
+            val bmpOut = kaifu2x.waifu2xChunkedRgba(bmp.rgbaToYCbCr().scaleNearest(2, 2)) { current, total ->
                 println("$current/$total")
             }
 
@@ -297,74 +305,46 @@ fun FloatArray2.toBmp32(): Bitmap32 {
 // Exposed functions
 object Kaifu2x {
     suspend fun noiseReductionRgba(image: Bitmap32, noise: Int, channels: List<BitmapChannel> = listOf(BitmapChannel.Y, BitmapChannel.A), parallel: Boolean = true, chunkSize: Int = 128, output: PrintStream? = System.err): Bitmap32 {
-        return getNoiseModel(noise, output)?.waifu2xCoreRgba("noise$noise", image, channels, parallel, chunkSize, output) ?: image
+        //return getNoiseModel(noise, output)?.waifu2xCoreRgba("noise$noise", image, channels, parallel, chunkSize, output) ?: image
+        val noiseModel = getNoiseModel(noise, output) ?: return image
+        return processMeasurer("noise$noise", output) { progress ->
+            Kaifu2xOpencl(noiseModel).use { it.waifu2xChunkedRgba(image, *channels.toTypedArray(), chunkSize = chunkSize, progress = progress) }
+        }
     }
 
     suspend fun scaleRgba(image: Bitmap32, scale: Int, channels: List<BitmapChannel> = listOf(BitmapChannel.Y, BitmapChannel.A), parallel: Boolean = true, chunkSize: Int = 128, output: PrintStream? = System.err): Bitmap32 {
         return when (scale) {
             1 -> image
-            2 -> getScale2xModel(output).waifu2xCoreRgba("scale$scale", image.scaleNearest(scale, scale), channels, parallel, chunkSize, output)
+            2 -> {
+                processMeasurer("scale$scale", output) { progress ->
+                    Kaifu2xOpencl(getScale2xModel(output)!!).use { it.waifu2xChunkedRgba(image.scaleNearest(2, 2), *channels.toTypedArray(), chunkSize = chunkSize, progress = progress) }
+                }
+            }
             else -> invalidArg("Invalid scale $scale")
         }
     }
 }
 
-suspend fun Model.waifu2xCoreRgba(name: String, image: Bitmap32, channels: List<BitmapChannel>, parallel: Boolean, chunkSize: Int, output: PrintStream?): Bitmap32 {
-    val model = this
-    val imYCbCr = image.rgbaToYCbCr()
-    val padding = this.padding
+fun <T> processMeasurer(name: String, output: PrintStream? = System.out, callback: (progress: (Int, Int) -> Unit) -> T): T {
+    val startTime = System.currentTimeMillis()
 
-    val time = measureTimeMillis {
-        output?.print("Computing relevant channels...\r")
-        val achannels = channels.filter { imYCbCr.readChannelf(it).run { !areAllEqualTo(this[0, 0]) } }
-
-        output?.println("Channels: Requested${channels.map { it.toStringYCbCr() }} -> Required${achannels.map { it.toStringYCbCr() }}")
-        val nthreads = if (parallel) Runtime.getRuntime().availableProcessors() else 1
-        output?.println("Chunk size: $chunkSize, Threads: $nthreads")
-
-        var processedPixels = 0
-        val totalPixels = imYCbCr.area
-
-        val startTime = System.currentTimeMillis()
-        for (y in 0 until imYCbCr.height step chunkSize) {
-            for (x in 0 until imYCbCr.width step chunkSize) {
-                val swidth = min(chunkSize, imYCbCr.width - x)
-                val sheight = min(chunkSize, imYCbCr.height - y)
-                //println("CHUNK($x, $y, $swidth, $sheight) [${imYCbCr.width}, ${imYCbCr.height}]")
-                val inPaddedChunk = imYCbCr.copySliceWithSizeOutOfBounds(x - padding, y - padding, swidth + padding * 2, sheight + padding * 2)
-
-                //println("inPaddedChunk: $inPaddedChunk")
-
-                System.gc()
-
-                val chunkPixels = (inPaddedChunk.width - padding * 2) * (inPaddedChunk.height - padding * 2)
-                val outUnpaddedChunk = model.waifu2xYCbCrNoPadding(inPaddedChunk, achannels, nthreads = nthreads) { current, total ->
-                    if (output == null) return@waifu2xYCbCrNoPadding
-                    val currentTime = System.currentTimeMillis()
-                    val localRatio = current.toDouble() / total.toDouble()
-                    val localProcessedPixels = (chunkPixels * localRatio).toInt()
-                    val totalProcessedPixels = processedPixels + localProcessedPixels
-                    val ratio = totalProcessedPixels.toDouble() / totalPixels.toDouble()
-                    val elapsedMs = (currentTime - startTime)
-                    val estimatedMs = elapsedMs * (1.0 / ratio)
-                    output.print(
-                            "\r[%s] %.1f%% - ELA: %s - ETA: %s - MEM: %s ".format(
-                                    name,
-                                    (ratio * 100).toFloat(),
-                                    TimeSpan.toTimeString(elapsedMs.toInt()),
-                                    TimeSpan.toTimeString((estimatedMs - elapsedMs).toInt()),
-                                    getMemoryUsedString()
-                            )
+    return callback { current, total ->
+        if (output != null) {
+            val currentTime = System.currentTimeMillis()
+            val ratio = current.toDouble() / total.toDouble()
+            val elapsedMs = (currentTime - startTime)
+            val estimatedMs = elapsedMs * (1.0 / ratio)
+            output.print(
+                    "\r[%s] %.1f%% - ELA: %s - ETA: %s - MEM: %s ".format(
+                            name,
+                            (ratio * 100).toFloat(),
+                            TimeSpan.toTimeString(elapsedMs.toInt()),
+                            TimeSpan.toTimeString((estimatedMs - elapsedMs).toInt()),
+                            getMemoryUsedString()
                     )
-                }
-                processedPixels += chunkPixels
-                imYCbCr.put(outUnpaddedChunk, x, y)
-            }
+            )
         }
     }
-    output?.println()
-    output?.println("Took: " + time.toDouble() / 1000 + " seconds")
-    return imYCbCr.yCbCrToRgba()
 }
 
 fun getMemoryUsedString(): String {
@@ -374,101 +354,6 @@ fun getMemoryUsedString(): String {
 fun getMemoryUsed(): Long {
     return Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()
 }
-
-fun Model.waifu2xYCbCrNoPadding(imYCbCr: Bitmap32, achannels: List<BitmapChannel>, nthreads: Int, progressReport: (Int, Int) -> Unit = { cur, total -> }): Bitmap32 {
-    val padding = this.padding
-
-    val out = imYCbCr.copySliceWithBounds(padding, padding, imYCbCr.width - padding, imYCbCr.height - padding)
-
-    for ((index, c) in achannels.withIndex()) {
-        val data = imYCbCr.readChannelf(c)
-        val ref = data.data[0]
-        val isSolid = data.data.all { it == ref }
-        if (!isSolid) {
-            val result = waifu2xCore(data, nthreads = nthreads, addPadding = false) { current, total ->
-                val rcurrent = index * total + current
-                val rtotal = total * achannels.size
-                progressReport(rcurrent, rtotal)
-            }
-            out.writeChannelf(c, result)
-        }
-    }
-    return out
-}
-
-fun Model.waifu2xCore(map: FloatArray2, nthreads: Int, addPadding: Boolean = true, progressReport: (Int, Int) -> Unit = { cur, total -> }): FloatArray2 {
-    var i_planes = if (addPadding) arrayOf(map.paddedEdge(steps.size)) else arrayOf(map)
-    val total = steps.map { it.nInputPlane * it.nOutputPlane }.sum()
-    var current = 0
-    val tpool = Executors.newFixedThreadPool(nthreads)
-
-    //progressReport(0, total)
-
-    for (step in steps) {
-        val fip = i_planes[0]
-        val owidth = fip.width - 2
-        val oheight = fip.height - 2
-        // Do all allocations here for this step!
-        val o_planes = Array(step.weight.size) { FloatArray2(owidth, oheight) }
-        val tpartials = Array(nthreads) { FloatArray2(owidth, oheight) }
-        val pList = Array(nthreads) { FloatArray2(owidth, oheight) }
-
-        for (index in 0 until step.weight.size) {
-            val bias = step.bias[index]
-            val weights = step.weight[index]
-
-            val futures = (0 until nthreads).map { threadId ->
-                tpool.submit {
-                    var first = true
-                    val partial = tpartials[threadId]
-                    val p = pList[threadId]
-                    for (i in threadId until weights.size step nthreads) {
-                        val ip = i_planes[i]
-                        val kernel = weights[i]
-
-                        p.setToConvolvedValidOptimized(ip, kernel)
-
-                        if (first) {
-                            partial.setTo(p)
-                            first = false
-                        } else {
-                            partial.setToAdd(partial, p)
-                        }
-                    }
-                }
-            }
-
-            val partial = o_planes[index]
-
-            // Wait all tasks to complete
-            for (n in 0 until nthreads) futures[n].get()
-
-            // Accumulate partial values from threads
-            for (n in 0 until nthreads) {
-                if (n == 0) {
-                    partial.setTo(tpartials[n])
-                } else {
-                    partial.setToAdd(partial, tpartials[n])
-                }
-            }
-
-            partial.setToFunc(partial) {
-                val bit = it + bias
-                max(bit, 0f) + (min(bit, 0f) * 0.1f)
-            }
-
-            current += weights.size
-            progressReport(current, total)
-        }
-
-        i_planes = o_planes
-    }
-
-    tpool.shutdown()
-
-    return i_planes.first()
-}
-
 
 internal fun readModel(name: String, output: PrintStream? = System.err): Model {
     output?.print("Reading $name...")
