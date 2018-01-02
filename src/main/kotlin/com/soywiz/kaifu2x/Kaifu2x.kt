@@ -23,6 +23,7 @@ import com.soywiz.korio.vfs.localCurrentDirVfs
 import java.io.Closeable
 import java.io.PrintStream
 import java.util.*
+import kotlin.collections.LinkedHashMap
 import kotlin.math.min
 import kotlin.system.exitProcess
 
@@ -355,7 +356,8 @@ fun <T> processMeasurer(name: String, output: PrintStream? = System.out, callbac
 fun getMemoryUsedString(): String = "%.2f MB".format(getMemoryUsed().toDouble() / (1024.0 * 1024.0))
 fun getMemoryUsed(): Long = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()
 
-internal fun readModel(name: String, output: PrintStream? = System.err): Model {
+private val modelCache = LinkedHashMap<String, Model>()
+internal fun readModel(name: String, output: PrintStream? = System.err): Model = modelCache.getOrPut(name) {
     output?.print("Reading $name...")
     val jsonString = Kaifu2x::class.java.getResourceAsStream("/models/$name").readBytes().toString(ASCII)
     //val jsonString = ClassLoader.getSystemClassLoader().getResourceAsStream("models/$name").readBytes().toString(ASCII)
