@@ -9,6 +9,8 @@ It uses a [caffee-based](http://caffe.berkeleyvision.org/) deep learning models.
 Kotlin implementation uses [Korlib's Korim](https://github.com/korlibs/korim) for image processing.
 And it includes code to process convulational 3x3 kernels on a float matrix.
 
+Version 4 uses OpenCL
+
 ![](/docs/kaifu2x.side2side.png)
 
 ### How to use CLI?
@@ -58,7 +60,7 @@ kscript https://raw.githubusercontent.com/soywiz/kaifu2x/d72ee3dbd6f735f72da46d6
 
 It is published to maven central. In your `build.gradle` (or maven equivalent):
 ```
-compile "com.soywiz:kaifu2x:0.3.0"
+compile "com.soywiz:kaifu2x:0.4.0"
 ```
 
 Exposed API:
@@ -74,7 +76,7 @@ object Kaifu2x {
 ### Help
 
 ```
-kaifu2x - 0.3.0 - 2017
+kaifu2x - 0.4.0 - 2017
 
 Usage: kaifu2x [switches] <input.png> <output.png>
 
@@ -119,6 +121,10 @@ Version 0.3.0, successfully part the image in chunks of 128x128 by default (you 
 So the memory requirements are now much lower. `128*128*4*256=16MB`, and it is typical that the cli uses around ~50MB
 for any image size, though times still are slow until hardware acceleration is implemented. Also processor caches
 are most likely to hit, so for bigger images this is better.
+
+### Some numbers (v0.4.0)
+
+This versions already uses OpenCL, so it can achieve much better numbers with a good GPU.
 
 ### How does this work?
 
