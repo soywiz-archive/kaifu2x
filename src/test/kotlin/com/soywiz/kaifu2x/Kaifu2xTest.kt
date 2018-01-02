@@ -4,10 +4,7 @@ import com.soywiz.korim.bitmap.A
 import com.soywiz.korim.bitmap.Bitmap32
 import com.soywiz.korim.bitmap.BitmapChannel
 import com.soywiz.korim.bitmap.Y
-import com.soywiz.korim.format.PNG
-import com.soywiz.korim.format.defaultImageFormats
-import com.soywiz.korim.format.readBitmap
-import com.soywiz.korim.format.registerStandard
+import com.soywiz.korim.format.*
 import com.soywiz.korio.async.syncTest
 import com.soywiz.korio.crypto.toBase64
 import com.soywiz.korio.error.invalidOp
@@ -23,9 +20,9 @@ class Kaifu2xTest {
 		defaultImageFormats.registerStandard()
 	}
 
-	private fun testScale2x(input: VfsFile, expected: VfsFile, vararg channels: BitmapChannel, psnrMin: Double = 50.0) = syncTest {
-		val inputBmp = input.readBitmap().toBMP32()
-		val expectedBmp = expected.readBitmap().toBMP32()
+	private fun testScale2x(input: VfsFile, expected: VfsFile, vararg channels: BitmapChannel, psnrMin: Double = 45.0) = syncTest {
+		val inputBmp = input.readBitmapNoNative().toBMP32()
+		val expectedBmp = expected.readBitmapNoNative().toBMP32()
 		val result = Kaifu2x.scaleRgba(inputBmp, 2, channels = channels.toList(), output = null)
 		val psnr = PSNR(expectedBmp, result)
 		// 0.5 dB increments are considered noticeable
