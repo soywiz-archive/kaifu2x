@@ -120,7 +120,6 @@ object Kaifu2xCli {
 class Kaifu2xOpencl(private val model: Model) : Closeable {
     private val steps = model.steps
     private val ctx = ClContext()
-    private val queue = ctx.createCommandQueue()
     private val program = ctx.createProgram("""
         __kernel void waifu2x(
             const unsigned int width,
@@ -160,7 +159,7 @@ class Kaifu2xOpencl(private val model: Model) : Closeable {
         val bw = data.width
         val bh = data.height
         val pad = model.padding
-        val out = queue {
+        val out = ctx.queue {
             finish()
 
             var ninput = ctx.createBuffer(data.data)
@@ -181,7 +180,7 @@ class Kaifu2xOpencl(private val model: Model) : Closeable {
                 //println("i=$i, n_out=$n_out, n_in=$n_in, bw=$bw, bh=$bh, bias_buf=${bias_buf.length}, kern_buf=${kern_buf.length}")
 
                 waifu2x(
-                        queue,
+                        this@queue,
                         bw, bh, n_in, n_out,
                         ninput, kern_buf, bias_buf, noutput,
                         globalWorkRanges = listOf(
@@ -209,8 +208,11 @@ class Kaifu2xOpencl(private val model: Model) : Closeable {
         val out = data[7 until data.width - 7, 7 until data.height - 7]
         for (channel in channels) {
             val i = data.readChannelf(channel)
-            val o = waifu2x(i)
-            out.writeChannelf(channel, o)
+            val first = i.data[0]
+            if (!i.data.all { it == first }) {
+                val o = waifu2x(i)
+                out.writeChannelf(channel, o)
+            }
         }
         return out
     }
@@ -241,7 +243,7 @@ class Kaifu2xOpencl(private val model: Model) : Closeable {
                 currentPixels += (width - pad) * (height - pad)
             }
         }
-        progress(currentPixels, totalPixels)
+        progress(totalPixels, totalPixels)
 
         return bmpOut
     }
@@ -251,7 +253,6 @@ class Kaifu2xOpencl(private val model: Model) : Closeable {
     }
 
     override fun close() {
-        queue.close()
         ctx.close()
     }
 
@@ -309,6 +310,8 @@ object Kaifu2x {
         val noiseModel = getNoiseModel(noise, output) ?: return image
         return processMeasurer("noise$noise", output) { progress ->
             Kaifu2xOpencl(noiseModel).use { it.waifu2xChunkedRgba(image, *channels.toTypedArray(), chunkSize = chunkSize, progress = progress) }
+        }.apply {
+            output?.println()
         }
     }
 
@@ -318,6 +321,8 @@ object Kaifu2x {
             2 -> {
                 processMeasurer("scale$scale", output) { progress ->
                     Kaifu2xOpencl(getScale2xModel(output)!!).use { it.waifu2xChunkedRgba(image.scaleNearest(2, 2), *channels.toTypedArray(), chunkSize = chunkSize, progress = progress) }
+                }.apply {
+                    output?.println()
                 }
             }
             else -> invalidArg("Invalid scale $scale")
@@ -347,13 +352,8 @@ fun <T> processMeasurer(name: String, output: PrintStream? = System.out, callbac
     }
 }
 
-fun getMemoryUsedString(): String {
-    return "%.2f MB".format(getMemoryUsed().toDouble() / (1024.0 * 1024.0))
-}
-
-fun getMemoryUsed(): Long {
-    return Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()
-}
+fun getMemoryUsedString(): String = "%.2f MB".format(getMemoryUsed().toDouble() / (1024.0 * 1024.0))
+fun getMemoryUsed(): Long = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()
 
 internal fun readModel(name: String, output: PrintStream? = System.err): Model {
     output?.print("Reading $name...")

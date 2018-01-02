@@ -16,23 +16,25 @@ class ClContext(val type: DeviceType = DeviceType.PREFER_GPU) : Closeable {
 
     internal val context: cl_context
     internal val platform: cl_platform_id
-    internal val device: cl_device_id
+    internal val deviceId: cl_device_id
+    val deviceName: String
 
     init {
         setExceptionsEnabled(true)
 
         platform = getPlatformIds().first()
-        device = when (type) {
+        deviceId = when (type) {
             DeviceType.ANY -> platform.getDevices(CL_DEVICE_TYPE_ALL).first()
             DeviceType.PREFER_GPU -> platform.getDevices(CL_DEVICE_TYPE_GPU).firstOrNull() ?: platform.getDevices(CL_DEVICE_TYPE_ACCELERATOR).firstOrNull() ?: platform.getDevices(CL_DEVICE_TYPE_ALL).first()
             DeviceType.FORCE_GPU -> platform.getDevices(CL_DEVICE_TYPE_GPU).firstOrNull() ?: invalidOp("Can't find GPU devices")
         }
-        println("OpenCL Device: " + device.name)
+        deviceName = deviceId.name
+        //println("OpenCL Device: " + deviceId.name)
 
         // Create a context for the selected device
         context = clCreateContext(
                 cl_context_properties().apply { addProperty(CL_CONTEXT_PLATFORM.toLong(), platform) },
-                1, arrayOf(device), null, null, null
+                1, arrayOf(deviceId), null, null, null
         )
     }
 
@@ -148,7 +150,7 @@ class ClKernel(val program: ClProgram, val name: String) {
 }
 
 class ClCommandQueue(val ctx: ClContext) : Closeable {
-    val commandQueue = clCreateCommandQueue(ctx.context, ctx.device, 0, null)
+    val commandQueue = clCreateCommandQueue(ctx.context, ctx.deviceId, 0, null)
 
     fun readByteBuffer(buffer: ClBuffer): ByteBuffer {
         val out = ByteBuffer.allocate(buffer.sizeInBytes).order(ByteOrder.nativeOrder())
