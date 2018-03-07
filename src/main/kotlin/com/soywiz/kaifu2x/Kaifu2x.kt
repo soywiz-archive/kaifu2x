@@ -1,31 +1,24 @@
 package com.soywiz.kaifu2x
 
+import com.jogamp.opencl.*
 import com.soywiz.kaifu2x.util.*
-import com.soywiz.klock.TimeSpan
-import com.soywiz.korim.bitmap.A
-import com.soywiz.korim.bitmap.Bitmap32
-import com.soywiz.korim.bitmap.BitmapChannel
-import com.soywiz.korim.bitmap.Y
-import com.soywiz.korim.color.RGBA
+import com.soywiz.klock.*
+import com.soywiz.korim.bitmap.*
+import com.soywiz.korim.color.*
 import com.soywiz.korim.format.*
-import com.soywiz.korio.Korio
-import com.soywiz.korio.error.invalidArg
-import com.soywiz.korio.error.invalidOp
-import com.soywiz.korio.lang.ASCII
-import com.soywiz.korio.lang.toString
-import com.soywiz.korio.serialization.json.Json
-import com.soywiz.korio.util.clamp
-import com.soywiz.korio.util.substr
-import com.soywiz.korio.util.toIntCeil
-import com.soywiz.korio.vfs.PathInfo
-import com.soywiz.korio.vfs.UniversalVfs
-import com.soywiz.korio.vfs.localCurrentDirVfs
+import com.soywiz.korio.*
+import com.soywiz.korio.error.*
+import com.soywiz.korio.lang.*
+import com.soywiz.korio.serialization.json.*
+import com.soywiz.korio.util.*
+import com.soywiz.korio.vfs.*
+import java.io.*
 import java.io.Closeable
-import java.io.PrintStream
-import java.util.*
-import kotlin.collections.LinkedHashMap
-import kotlin.math.min
-import kotlin.system.exitProcess
+import java.nio.*
+import java.util.LinkedList
+import kotlin.collections.*
+import kotlin.math.*
+import kotlin.system.*
 
 fun main(args: Array<String>) = Kaifu2xCli.main(args)
 
@@ -42,8 +35,6 @@ object Kaifu2xCli {
         System.err.println("  -s[1-2]   - Scale level 1=1x, 2=2x [default to 1 (no scale)]")
         System.err.println("  -cs<X>    - Chunk size [default to 128]")
         System.err.println("  -q[0-100] - The quality of the output (JPG, PNG) [default=100]")
-        System.err.println("  -mt       - Multi Threaded [default]")
-        System.err.println("  -st       - Single Threaded")
         System.err.println("  -cl       - Process Luminance")
         System.err.println("  -cla      - Process Luminance & Alpha")
         System.err.println("  -clca     - Process Luminance & Chroma & Alpha [default]")
@@ -53,7 +44,6 @@ object Kaifu2xCli {
 
     @JvmStatic
     fun main(args: Array<String>) = Korio {
-        var parallel = true
         var channels = BitmapChannel.ALL.toList()
         var inputName: String? = null
         var outputName: String? = null
@@ -70,8 +60,6 @@ object Kaifu2xCli {
             when {
                 c == "-h" -> helpAndExit()
                 c == "-v" -> run { println(KAIFU2X_VERSION); exitProcess(-1) }
-                c == "-st" -> parallel = false
-                c == "-mt" -> parallel = true
                 c == "-cl" -> channels = listOf(BitmapChannel.Y)
                 c == "-cla" -> channels = listOf(BitmapChannel.Y, BitmapChannel.A)
                 c == "-clca" -> channels = BitmapChannel.ALL.toList()
@@ -97,15 +85,20 @@ object Kaifu2xCli {
 
         val outputExtension = PathInfo(outputFileName).extensionLC
 
-        if (outputExtension !in listOf("png", "jpg")) invalidOp("Just supported 'png' or 'jpg' outputs but found extension $outputExtension")
+        if (outputExtension !in listOf(
+                "png",
+                "jpg"
+            )
+        ) invalidOp("Just supported 'png' or 'jpg' outputs but found extension $outputExtension")
 
         defaultImageFormats.registerStandard()
         System.err.print("Reading $inputFileName...")
         val image = UniversalVfs(inputFileName).readBitmapNoNative().toBMP32()
         System.err.println("Ok")
 
-        val noiseReductedImage = Kaifu2x.noiseReductionRgba(image, noiseReduction, channels, parallel, chunkSize = chunkSize)
-        val scaledImage = Kaifu2x.scaleRgba(noiseReductedImage, scale, channels, parallel, chunkSize = chunkSize)
+        val noiseReductedImage =
+            Kaifu2x.noiseReductionRgba(image, noiseReduction, channels, chunkSize = chunkSize)
+        val scaledImage = Kaifu2x.scaleRgba(noiseReductedImage, scale, channels)
 
         val outFile = UniversalVfs(outputFileName).ensureParents()
         System.err.print("Writting $outputFileName...")
@@ -118,110 +111,274 @@ object Kaifu2xCli {
     }
 }
 
-class Kaifu2xOpencl(private val model: Model) : Closeable {
+class Kaifu2xOpencl(private val model: Model, val chunkSize: Int = 128) : Closeable {
     private val steps = model.steps
-    private val ctx = ClContext()
-    private val program = ctx.createProgram("""
+    //private val ctx = CLContext.create(CLDevice.Type.GPU)
+    private val ctx = try {
+        CLContext.create(CLDevice.Type.GPU)
+    } catch (e: Throwable) {
+        CLContext.create()
+    }
+    val noutputs = listOf(32, 32, 64, 64, 128, 128, 1)
+    private val program = ctx.createProgram(
+        """
+        #define hload(array, n) vload_half(n, array)
+        #define hstore(array, n, value) vstore_half(value, n, array)
+
+        #define fload(array, n) array[n]
+        #define fstore(array, n, value) array[n] = value
+
         __kernel void waifu2x(
-            const unsigned int width,
-            const unsigned int height,
-            const unsigned int num_inputs,
-            const unsigned int num_outputs,
-            global const float *in,
-            global const float *krn,
-            global const float *bias,
-            global float *out
+            const int width,
+            const int height,
+            const int inputs,
+            __read_only global const half *krn,
+            __read_only global const half *bias,
+            __read_only global const float *in,
+            __write_only global float *out,
+            int TW, int TH, int TD
         ) {
             int area = width * height;
             int x = get_global_id(0);
             int y = get_global_id(1);
             int z = get_global_id(2);
+
+            float acc = 0;
             int xy = x + (y * width);
 
-            float acc = bias[z];
-            int krnOffset = z * num_inputs * 9;
-            for (int i = 0; i < num_inputs; i++) {
-                int i_off = xy + (i * area);
+            for (int i = 0; i < inputs; i++) {
+                int off_kn = ((z * inputs * 3) + (i * 3));
+                int off_in = (xy + (i * area));
+
+                float3 kk[3] = {
+                    vload_half3(off_kn + 0, krn),
+                    vload_half3(off_kn + 1, krn),
+                    vload_half3(off_kn + 2, krn)
+                };
+
+                float3 ff[3] = {
+                    { in[off_in + (width * 0) + 0], in[off_in + (width * 0) + 1], in[off_in + (width * 0) + 2] },
+                    { in[off_in + (width * 1) + 0], in[off_in + (width * 1) + 1], in[off_in + (width * 1) + 2] },
+                    { in[off_in + (width * 2) + 0], in[off_in + (width * 2) + 1], in[off_in + (width * 2) + 2] }
+                };
+
+                float3 rr[3] = { kk[0] * ff[0], kk[1] * ff[1], kk[2] * ff[2] };
+
                 for (int j = 0; j < 3; j++) {
-                    for (int k = 0; k < 3; k++) {
-                        acc += in[i_off + (width * j) + k] * krn[krnOffset + (i * 9) + (j * 3) + k];
-                    }
+                    acc += rr[j].x;
+                    acc += rr[j].y;
+                    acc += rr[j].z;
                 }
             }
-            out[xy + (z * area)] = acc - 0.9 * fmin(acc, 0);
-        }
-    """)
-    private val waifu2x = program["waifu2x"]
-    private val biasPerStep = model.steps.map { ctx.createBuffer(it.bias) }
-    private val kernelPerSteps = model.steps.map { ctx.createBuffer(it.weight.flatMap { it.flatMap { it.toList() } }.toFloatArray()) }
-
-    // data already have padding
-    fun waifu2x(data: FloatArray2): FloatArray2 {
-        val bw = data.width
-        val bh = data.height
-        val pad = model.padding
-        val out = ctx.queue {
-            finish()
-
-            var ninput = ctx.createBuffer(data.data)
-            //val buffers = listOf(ctx.createBuffer(data.data)) + steps.map { ctx.createEmptyBuffer(4, bw * bh * it.nOutputPlane) }
-            lateinit var noutput: ClBuffer
-
-
-            for (i in 0 until steps.size) {
-                val n_in = steps[i].nInputPlane
-                val n_out = steps[i].nOutputPlane
-                val bias_buf = biasPerStep[i]
-                val kern_buf = kernelPerSteps[i]
-
-                //val ninput = buffers[i]
-                //noutput = buffers[i + 1]
-                noutput = ctx.createEmptyBuffer(4, bw * bh * n_out)
-
-                //println("i=$i, n_out=$n_out, n_in=$n_in, bw=$bw, bh=$bh, bias_buf=${bias_buf.length}, kern_buf=${kern_buf.length}")
-
-                waifu2x(
-                        this@queue,
-                        bw, bh, n_in, n_out,
-                        ninput, kern_buf, bias_buf, noutput,
-                        globalWorkRanges = listOf(
-                                0L until (bw - (2 * i) - 2),
-                                0L until (bh - (2 * i) - 2),
-                                0L until n_out.toLong()
-                        )
-                )
-
-                ninput.close()
-                ninput = noutput
-            }
-
-            noutput.readFloats().apply {
-                noutput.close()
-            }
+            float racc = acc + hload(bias, z);
+            fstore(out, xy + (z * area), racc - 0.9 * fmin(racc, 0));
         }
 
-        //println(out.toTypedArray().size)
-        //return FloatArray2(bw - pad * 2, bh - pad * 2, out.toTypedArray())
-        return FloatArray2(bw, bh, out.toTypedArray())[0 until (bw - pad * 2), 0 until (bh - pad * 2)]
+        __kernel void float_to_half(
+            __read_only global const float *in,
+            __write_only global half *out
+        ) {
+            int n = get_global_id(0);
+            hstore(out, n, fload(in, n));
+        }
+    """
+    ).apply {
+        build()
     }
 
-    fun waifu2x(data: Bitmap32, vararg channels: BitmapChannel = arrayOf(BitmapChannel.RED, BitmapChannel.GREEN, BitmapChannel.BLUE, BitmapChannel.ALPHA)): Bitmap32 {
+    val waifu2xKernel = program.createCLKernel("waifu2x")
+    val float_to_halfKernel = program.createCLKernel("float_to_half")
+
+
+    val device = ctx.maxFlopsDevice
+    val _queue: CLCommandQueue = device.createCommandQueue()
+
+    fun float_to_half(inp: CLBuffer<*>, outp: CLBuffer<*>, count: Int) {
+        float_to_halfKernel.rewind().putArg(inp).putArg(outp)
+        _queue.put1DRangeKernel(float_to_halfKernel, 0L, count.toLong(), 0L)
+    }
+
+    fun float_to_half(data: FloatBuffer): ByteBuffer {
+        //val len = data.limit()
+        //val bo = ByteBuffer.allocateDirect(len * 2).order(ByteOrder.nativeOrder())
+        //val bo2 = bo.asCharBuffer()
+        //for (n in 0 until len) bo2.put(n, HalfFloat.fromFloat(data[n]).toChar())
+
+        val len = data.limit()
+        val bo = ByteBuffer.allocateDirect(len * 2).order(ByteOrder.nativeOrder())
+        val bin = ctx.createBuffer(data, CLMemory.Mem.READ_ONLY)
+        val bout = ctx.createBuffer(bo, CLMemory.Mem.WRITE_ONLY)
+
+        _queue.putWriteBuffer(bin, false)
+        float_to_half(bin, bout, len)
+        _queue.putReadBuffer(bout, true)
+        //println(bo.position())
+
+        bout.release()
+        bin.release()
+
+
+        return bo
+    }
+
+    fun FloatBuffer.toHalf() = float_to_half(this)
+
+    private val biasPerStep = model.steps.map {
+        ctx.createBuffer(it.bias.check("bias").toDirectBuffer().toHalf(), CLMemory.Mem.READ_ONLY)
+            .apply { _queue.putWriteBuffer(this, false) }
+    }
+    private val kernelPerSteps = model.steps.map {
+        ctx.createBuffer(
+            it.weight.flatMap { it.flatMap { it.toList() } }.toFloatArray().check("kernel").toDirectBuffer().toHalf(),
+            CLMemory.Mem.READ_ONLY
+        ).apply { _queue.putWriteBuffer(this, false) }
+    }
+
+    private fun FloatArray.check(name: String): FloatArray {
+        val min = this.min()
+        val max = this.max()
+        //println("$name: $min, $max --> ${this.size}")
+        return this
+    }
+
+    init {
+        _queue.finish()
+    }
+
+    val inputBuffers: List<CLBuffer<FloatBuffer>> =
+        (0 until 4).map { ctx.createBuffer(DirectFloatBuffer(chunkSize * chunkSize), CLMemory.Mem.READ_ONLY) }
+    val inputBuffer: CLBuffer<FloatBuffer> = inputBuffers[0]
+
+    inner class WaifuWork {
+        val queue: CLCommandQueue = device.createCommandQueue()
+        val obuffers =
+            noutputs.map { ctx.createBuffer(DirectFloatBuffer(chunkSize * chunkSize * it), CLMemory.Mem.READ_WRITE) }
+    }
+
+    //val works = (0 until 4).map { WaifuWork() }
+    //val work = works.first()
+    val work = WaifuWork()
+
+    private fun waifu2x(
+        work: WaifuWork,
+        i: Int,
+        bw: Int,
+        bh: Int,
+        n_in: Int,
+        n_out: Int,
+        ninput: CLBuffer<*>,
+        kern_buf: CLBuffer<*>,
+        bias_buf: CLBuffer<*>,
+        noutput: CLBuffer<*>
+    ) {
+        //println("i=$i, n_out=$n_out, n_in=$n_in, bw=$bw, bh=$bh, bias_buf=${bias_buf.length}, kern_buf=${kern_buf.length}")
+
+        val TW = (bw - (2 * i)).toLong()
+        val TH = (bh - (2 * i)).toLong()
+        val TD = n_out.toLong()
+
+        waifu2xKernel.rewind()
+            .putArg(bw).putArg(bh)
+            .putArg(n_in)
+            .putArg(kern_buf).putArg(bias_buf)
+            .putArg(ninput).putArg(noutput)
+            .putArg(TW).putArg(TH).putArg(TD)
+
+        work.queue.put3DRangeKernel(
+            waifu2xKernel,
+            0L, 0L, 0L,
+            TW, TH, TD,
+            0L, 0L, 0L
+            //TW, TH, TD
+        )
+    }
+
+
+    fun waifu2x(work: WaifuWork, bw: Int, bh: Int, inputBuffer: CLBuffer<FloatBuffer>) {
+
+        var ninput: CLBuffer<FloatBuffer> = inputBuffer
+
+        lateinit var noutput: CLBuffer<FloatBuffer>
+
+        for (i in 0 until steps.size) {
+            val n_in = steps[i].nInputPlane
+            val n_out = steps[i].nOutputPlane
+            val bias_buf = biasPerStep[i]
+            val kern_buf = kernelPerSteps[i]
+
+            noutput = work.obuffers[i]
+            waifu2x(work, i, bw, bh, n_in, n_out, ninput, kern_buf, bias_buf, noutput)
+            ninput = noutput
+        }
+
+        work.queue.putCopyBuffer(noutput, inputBuffer)
+    }
+
+    // data already have padding
+    fun waifu2x(work: WaifuWork, data: FloatArray2, buffer: CLBuffer<FloatBuffer> = inputBuffer): () -> FloatArray2 {
+        val pad = model.padding
+        val bw = data.width
+        val bh = data.height
+        buffer.buffer.clear()
+        buffer.buffer.put(data.data)
+        buffer.buffer.flip()
+        work.queue.putWriteBuffer(buffer, false)
+
+        waifu2x(work, bw, bh, buffer)
+
+        return {
+            work.queue.putReadBuffer(buffer, true)
+            val out = FloatArray(buffer.buffer.limit())
+            buffer.buffer.position(0)
+            buffer.buffer.get(out)
+            FloatArray2(bw, bh, out)[0 until (bw - pad * 2), 0 until (bh - pad * 2)]
+        }
+    }
+
+    fun waifu2x(
+        data: Bitmap32,
+        vararg channels: BitmapChannel = arrayOf(
+            BitmapChannel.RED,
+            BitmapChannel.GREEN,
+            BitmapChannel.BLUE,
+            BitmapChannel.ALPHA
+        )
+    ): Bitmap32 {
         val out = data[7 until data.width - 7, 7 until data.height - 7]
-        for (channel in channels) {
+
+        val ochannels = arrayListOf<Pair<BitmapChannel, () -> FloatArray2>>()
+        for ((index, channel) in channels.withIndex()) {
             val i = data.readChannelf(channel)
             val first = i.data[0]
             if (!i.data.all { it == first }) {
-                val o = waifu2x(i)
-                out.writeChannelf(channel, o)
+                //val gen = waifu2x(works[index], i, inputBuffers[index])
+                val gen = waifu2x(work, i, inputBuffers[index])
+                ochannels += channel to gen
             }
+        }
+        for ((channel, gen) in ochannels) {
+            out.writeChannelf(channel, gen())
         }
         return out
     }
 
-    fun waifu2xChunkedYCbCr(bmpYCbCr: Bitmap32, vararg channels: BitmapChannel = arrayOf(BitmapChannel.RED, BitmapChannel.GREEN, BitmapChannel.BLUE, BitmapChannel.ALPHA), chunkSize: Int = 128, progress: (current: Int, total: Int) -> Unit = { current, total -> }): Bitmap32 {
-        val pad = steps.size * 2
-        val bmpPad = bmpYCbCr.pad(pad / 2)
-        val bmpOut = Bitmap32(bmpPad.width - pad, bmpPad.height - pad)
+    fun waifu2xChunkedYCbCr(
+        bmpYCbCr: Bitmap32,
+        vararg channels: BitmapChannel = arrayOf(
+            BitmapChannel.RED,
+            BitmapChannel.GREEN,
+            BitmapChannel.BLUE,
+            BitmapChannel.ALPHA
+        ),
+        progress: (current: Int, total: Int) -> Unit = { current, total -> }
+    ): Bitmap32 {
+        val pad1 = steps.size
+        val pad2 = pad1 * 2
+        val pad = pad1 * 2
+        //val bmpPad = Bitmap32(bmpYCbCr.width.nextAlignedTo(chunkSize) + pad2, bmpYCbCr.height.nextAlignedTo(chunkSize) + pad2)
+        val bmpPad = Bitmap32(bmpYCbCr.width + pad2, bmpYCbCr.height + pad2)
+        bmpPad.put(bmpYCbCr, pad1, pad1)
+        val bmpOut = Bitmap32(bmpPad.width - pad2, bmpPad.height - pad2)
         val chunkSizePad = chunkSize - pad
 
         var currentPixels = 0
@@ -237,39 +394,87 @@ class Kaifu2xOpencl(private val model: Model) : Closeable {
                 progress(currentPixels, totalPixels)
                 if (width >= pad && height >= pad) {
                     val chunk = bmpPad.copySliceWithSize(px, py, width, height)
+                    //val chunk2 = chunk.resize(chunkSize, chunkSize)
                     val out = waifu2x(chunk, *channels)
+                    val px = cx * (chunkSize - pad)
+                    val py = cy * (chunkSize - pad)
                     //println("$currentPixels/$totalPixels")
-                    bmpOut.put(out, cx * (chunkSize - pad), cy * (chunkSize - pad))
+
+                    //println("--------")
+                    //println(bmpOut)
+                    //println(chunk)
+                    //println(chunk2)
+                    //println(out)
+                    //println("$px, $py")
+                    //println("$width, $height")
+                    bmpOut._draw(
+                        out,
+                        px,
+                        py,
+                        0,
+                        0,
+                        min(min(out.width, width), bmpOut.width - px),
+                        min(min(out.height, height), bmpOut.height - py),
+                        false
+                    )
                 }
                 currentPixels += (width - pad) * (height - pad)
             }
         }
         progress(totalPixels, totalPixels)
 
-        return bmpOut
+        return bmpOut.copySliceWithSize(0, 0, bmpYCbCr.width, bmpYCbCr.height)
     }
 
-    fun waifu2xChunkedRgba(bmp: Bitmap32, vararg channels: BitmapChannel = arrayOf(BitmapChannel.RED, BitmapChannel.GREEN, BitmapChannel.BLUE, BitmapChannel.ALPHA), chunkSize: Int = 128, progress: (current: Int, total: Int) -> Unit = { current, total -> }): Bitmap32 {
-        return waifu2xChunkedYCbCr(bmp.rgbaToYCbCr(), *channels, chunkSize = chunkSize, progress = progress).yCbCrToRgba()
+    fun waifu2xChunkedRgba(
+        bmp: Bitmap32,
+        vararg channels: BitmapChannel = arrayOf(
+            BitmapChannel.RED,
+            BitmapChannel.GREEN,
+            BitmapChannel.BLUE,
+            BitmapChannel.ALPHA
+        ),
+        progress: (current: Int, total: Int) -> Unit = { current, total -> }
+    ): Bitmap32 {
+        return waifu2xChunkedYCbCr(
+            bmp.rgbaToYCbCr(),
+            *channels,
+            progress = progress
+        ).yCbCrToRgba()
     }
+
+    suspend fun waifu2xChunkedRgbaFast(
+        bmp: Bitmap32,
+        vararg channels: BitmapChannel = arrayOf(
+            BitmapChannel.RED,
+            BitmapChannel.GREEN,
+            BitmapChannel.BLUE,
+            BitmapChannel.ALPHA
+        ),
+        progress: (current: Int, total: Int) -> Unit = { current, total -> }
+    ) = waifu2xChunkedRgba(bmp.scaleNearest(2, 2), *channels, progress = progress)
 
     override fun close() {
         ctx.close()
     }
+}
 
-    companion object {
-        @JvmStatic
-        fun main(args: Array<String>) = Korio {
-            val bmp = localCurrentDirVfs["src/test/resources/goku_small_bg.png"].readBitmapNoNative().toBMP32()
-            val kaifu2x = Kaifu2xOpencl(getScale2xModel())
-
-            val bmpOut = kaifu2x.waifu2xChunkedRgba(bmp.rgbaToYCbCr().scaleNearest(2, 2)) { current, total ->
-                println("$current/$total")
-            }
-
-            localCurrentDirVfs["pad.png"].writeBitmap(bmpOut.yCbCrToRgba())
+fun Bitmap32.scaleNearestFloat(sx: Float, sy: Float): Bitmap32 {
+    val out = Bitmap32((width * sx).toInt(), (height * sy).toInt())
+    val isx = 1f / sx
+    val isy = 1f / sy
+    for (y in 0 until out.height) {
+        for (x in 0 until out.width) {
+            out[x, y] = this[(x * isx).toInt(), (y * isy).toInt()]
         }
     }
+    return out
+}
+
+private fun Bitmap32.resize(ewidth: Int, eheight: Int): Bitmap32 {
+    val out = Bitmap32(ewidth, eheight)
+    out.put(this)
+    return out
 }
 
 // @TODO: Move to korio and korim
@@ -306,22 +511,44 @@ fun FloatArray2.toBmp32(): Bitmap32 {
 
 // Exposed functions
 object Kaifu2x {
-    suspend fun noiseReductionRgba(image: Bitmap32, noise: Int, channels: List<BitmapChannel> = listOf(BitmapChannel.Y, BitmapChannel.A), parallel: Boolean = true, chunkSize: Int = 128, output: PrintStream? = System.err): Bitmap32 {
+    suspend fun noiseReductionRgba(
+        image: Bitmap32,
+        noise: Int,
+        channels: List<BitmapChannel> = listOf(BitmapChannel.Y, BitmapChannel.A),
+        parallel: Boolean = true,
+        chunkSize: Int = 128,
+        output: PrintStream? = System.err
+    ): Bitmap32 {
         //return getNoiseModel(noise, output)?.waifu2xCoreRgba("noise$noise", image, channels, parallel, chunkSize, output) ?: image
         val noiseModel = getNoiseModel(noise, output) ?: return image
         return processMeasurer("noise$noise", output) { progress ->
-            Kaifu2xOpencl(noiseModel).use { it.waifu2xChunkedRgba(image, *channels.toTypedArray(), chunkSize = chunkSize, progress = progress) }
+            Kaifu2xOpencl(noiseModel, chunkSize).use {
+                it.waifu2xChunkedRgba(
+                    image,
+                    *channels.toTypedArray(),
+                    progress = progress
+                )
+            }
         }.apply {
             output?.println()
         }
     }
 
-    suspend fun scaleRgba(image: Bitmap32, scale: Int, channels: List<BitmapChannel> = listOf(BitmapChannel.Y, BitmapChannel.A), parallel: Boolean = true, chunkSize: Int = 128, output: PrintStream? = System.err): Bitmap32 {
+    val scale2x by lazy {
+        Kaifu2xOpencl(getScale2xModel(System.err), chunkSize = 128)
+    }
+
+    suspend fun scaleRgba(
+        image: Bitmap32,
+        scale: Int,
+        channels: List<BitmapChannel> = listOf(BitmapChannel.Y, BitmapChannel.A),
+        output: PrintStream? = System.err
+    ): Bitmap32 {
         return when (scale) {
             1 -> image
             2 -> {
                 processMeasurer("scale$scale", output) { progress ->
-                    Kaifu2xOpencl(getScale2xModel(output)!!).use { it.waifu2xChunkedRgba(image.scaleNearest(2, 2), *channels.toTypedArray(), chunkSize = chunkSize, progress = progress) }
+                    scale2x.waifu2xChunkedRgbaFast(image, *channels.toTypedArray(), progress = progress)
                 }.apply {
                     output?.println()
                 }
@@ -331,7 +558,11 @@ object Kaifu2x {
     }
 }
 
-fun <T> processMeasurer(name: String, output: PrintStream? = System.out, callback: (progress: (Int, Int) -> Unit) -> T): T {
+suspend fun <T> processMeasurer(
+    name: String,
+    output: PrintStream? = System.out,
+    callback: suspend (progress: (Int, Int) -> Unit) -> T
+): T {
     val startTime = System.currentTimeMillis()
 
     return callback { current, total ->
@@ -341,13 +572,13 @@ fun <T> processMeasurer(name: String, output: PrintStream? = System.out, callbac
             val elapsedMs = (currentTime - startTime)
             val estimatedMs = elapsedMs * (1.0 / ratio)
             output.print(
-                    "\r[%s] %.1f%% - ELA: %s - ETA: %s - MEM: %s ".format(
-                            name,
-                            (ratio * 100).toFloat(),
-                            TimeSpan.toTimeString(elapsedMs.toInt()),
-                            TimeSpan.toTimeString((estimatedMs - elapsedMs).toInt()),
-                            getMemoryUsedString()
-                    )
+                "\r[%s] %.1f%% - ELA: %s - ETA: %s - MEM: %s ".format(
+                    name,
+                    (ratio * 100).toFloat(),
+                    TimeSpan.toTimeString(elapsedMs.toInt()),
+                    TimeSpan.toTimeString((estimatedMs - elapsedMs).toInt()),
+                    getMemoryUsedString()
+                )
             )
         }
     }
@@ -368,4 +599,68 @@ internal fun readModel(name: String, output: PrintStream? = System.err): Model =
 }
 
 internal fun getScale2xModel(output: PrintStream? = System.err): Model = readModel("scale2.0x_model.json", output)
-internal fun getNoiseModel(level: Int, output: PrintStream? = System.err): Model? = if (level in 1..3) readModel("noise${level}_model.json", output) else null
+internal fun getNoiseModel(level: Int, output: PrintStream? = System.err): Model? =
+    if (level in 1..3) readModel("noise${level}_model.json", output) else null
+
+object HalfFloat {
+    // ignores the higher 16 bits
+    fun toFloat(hbits: Int): Float {
+        var mant = hbits and 0x03ff            // 10 bits mantissa
+        var exp = hbits and 0x7c00            // 5 bits exponent
+        if (exp == 0x7c00)
+        // NaN/Inf
+            exp = 0x3fc00                    // -> NaN/Inf
+        else if (exp != 0)
+        // normalized value
+        {
+            exp += 0x1c000                   // exp - 15 + 127
+            if (mant == 0 && exp > 0x1c400)
+            // smooth transition
+                return java.lang.Float.intBitsToFloat(
+                    hbits and 0x8000 shl 16
+                            or (exp shl 13) or 0x3ff
+                )
+        } else if (mant != 0)
+        // && exp==0 -> subnormal
+        {
+            exp = 0x1c400
+            do {
+                mant = mant shl 1
+                exp -= 0x400
+            } while ((mant and 0x400) == 0)
+            mant = mant and 0x3ff
+        }
+        return java.lang.Float.intBitsToFloat(
+            (((hbits and 0x8000) shl 16) or ((exp or mant) shl 13))
+        )
+    }
+
+    // returns all higher 16 bits as 0 for all results
+    fun fromFloat(fval: Float): Int {
+        val fbits = java.lang.Float.floatToIntBits(fval)
+        val sign = fbits.ushr(16) and 0x8000          // sign only
+        var `val` = (fbits and 0x7fffffff) + 0x1000 // rounded value
+
+        if (`val` >= 0x47800000)
+        // might be or become NaN/Inf
+        {                                     // avoid Inf due to rounding
+            return if (fbits and 0x7fffffff >= 0x47800000) {                                 // is or must become NaN/Inf
+                if (`val` < 0x7f800000) sign or 0x7c00 else sign or 0x7c00 or        // remains +/-Inf or NaN
+
+                        (fbits and 0x007fffff).ushr(13)     // make it +/-Inf
+                // keep NaN (and Inf) bits
+            } else sign or 0x7bff
+// unrounded not quite Inf
+        }
+        if (`val` >= 0x38800000)
+        // remains normalized value
+            return sign or (`val` - 0x38000000).ushr(13) // exp - 127 + 15
+        if (`val` < 0x33000000)
+        // too small for subnormal
+            return sign                      // becomes +/-0
+        `val` = (fbits and 0x7fffffff).ushr(23)  // tmp exp for subnormal calc
+        return sign or ((fbits and 0x7fffff or 0x800000) // add subnormal bit
+                + 0x800000.ushr(`val` - 102))     // round depending on cut off
+            .ushr(126 - `val`)   // div by 2^(1-(exp-127+15)) and >> 13 | exp=0
+    }
+}

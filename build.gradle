@@ -26,8 +26,7 @@ buildscript {
 
     dependencies {
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion"
-        classpath "gradle.plugin.com.soywiz:korlibs-build-gradle-plugin:0.1.5"
-        //classpath "com.soywiz:korlibs-build-gradle-plugin:0.1.5-SNAPSHOT"
+        classpath "gradle.plugin.com.soywiz:korlibs-build-gradle-plugin:0.1.7"
     }
 }
 
@@ -37,7 +36,20 @@ dependencies {
     compile "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlinVersion"
     compile "com.soywiz:korio:$korioVersion"
     compile "com.soywiz:korim:$korimVersion"
-    compile "org.jocl:jocl:2.0.0"
+    compile "org.jogamp.jocl:jocl:2.3.2"
+    compile "org.jogamp.jocl:jocl:2.3.2:natives-macosx-universal"
+    compile "org.jogamp.jocl:jocl:2.3.2:natives-linux-i586"
+    compile "org.jogamp.jocl:jocl:2.3.2:natives-linux-amd64"
+    compile "org.jogamp.jocl:jocl:2.3.2:natives-windows-i586"
+    compile "org.jogamp.jocl:jocl:2.3.2:natives-windows-amd64"
+
+    compile "org.jogamp.gluegen:gluegen:2.3.2"
+    compile "org.jogamp.gluegen:gluegen-rt:2.3.2"
+    compile "org.jogamp.gluegen:gluegen-rt:2.3.2:natives-macosx-universal"
+    compile "org.jogamp.gluegen:gluegen-rt:2.3.2:natives-linux-i586"
+    compile "org.jogamp.gluegen:gluegen-rt:2.3.2:natives-linux-amd64"
+    compile "org.jogamp.gluegen:gluegen-rt:2.3.2:natives-windows-i586"
+    compile "org.jogamp.gluegen:gluegen-rt:2.3.2:natives-windows-amd64"
 }
 
 task fatJarCore(type: Jar) {
