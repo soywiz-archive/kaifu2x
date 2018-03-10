@@ -27,8 +27,8 @@ class Kaifu2xTest {
 		val psnr = PSNR(expectedBmp, result)
 		// 0.5 dB increments are considered noticeable
 		if (psnr < psnrMin) {
-			println("Expected:" + PNG.encode(expectedBmp).toBase64())
-			println("Result:" + PNG.encode(result).toBase64())
+			//println("Expected:" + PNG.encode(expectedBmp).toBase64())
+			//println("Result:" + PNG.encode(result).toBase64())
 		}
 		assertTrue(psnr >= psnrMin, "PSNR was $psnr but we need it to be $psnrMin dB or better")
 
@@ -45,6 +45,15 @@ class Kaifu2xTest {
 
 	@Test
 	fun testScale2xYA() {
+		testScale2x(
+			resourcesVfs["goku_small_bg.png"],
+			resourcesVfs["goku_small_bg.2x.ya.png"],
+			BitmapChannel.Y, BitmapChannel.A
+		)
+	}
+
+	@Test
+	fun testScale2xYA2() {
 		testScale2x(
 			resourcesVfs["goku_small_bg.png"],
 			resourcesVfs["goku_small_bg.2x.ya.png"],
